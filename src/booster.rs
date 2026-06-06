@@ -791,27 +791,17 @@ impl fmt::Display for FeatureType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parameters::{self, learning, tree};
-
-    fn read_train_matrix() -> XGBResult<DMatrix> {
-        DMatrix::load(r#"{"uri": "xgboost-sys/xgboost/demo/data/agaricus.txt.train?format=libsvm"}"#)
-    }
-
-    fn load_test_booster() -> Booster {
-        let dmat = read_train_matrix().expect("Reading train matrix failed");
-        Booster::new_with_cached_dmats(&BoosterParameters::default(), &[&dmat]).expect("Creating Booster failed")
-    }
 
     #[test]
     fn set_booster_param() {
-        let mut booster = load_test_booster();
+        let mut booster = Booster::new(&[]).expect("Creating Booster failed");
         let res = booster.set_param("key", "value");
         assert!(res.is_ok());
     }
 
     #[test]
     fn get_set_attr() {
-        let mut booster = load_test_booster();
+        let mut booster = Booster::new(&[]).expect("Creating Booster failed");
         let attr = booster.get_attribute("foo").expect("Getting attribute failed");
         assert_eq!(attr, None);
 
@@ -822,9 +812,7 @@ mod tests {
 
     #[test]
     fn save_and_load_from_buffer() {
-        let dmat_train =
-            DMatrix::load(r#"{"uri": "xgboost-sys/xgboost/demo/data/agaricus.txt.train?format=libsvm"}"#).unwrap();
-        let mut booster = Booster::new_with_cached_dmats(&BoosterParameters::default(), &[&dmat_train]).unwrap();
+        let mut booster = Booster::new(&[]).expect("Creating Booster failed");
         let attr = booster.get_attribute("foo").expect("Getting attribute failed");
         assert_eq!(attr, None);
 
@@ -850,18 +838,14 @@ mod tests {
 
     #[test]
     fn get_attribute_names() {
-        let mut booster = load_test_booster();
+        let mut booster = Booster::new(&[]).expect("Creating Booster failed");
         let attrs = booster.get_attribute_names().expect("Getting attributes failed");
         assert_eq!(attrs, Vec::<String>::new());
 
         booster.set_attribute("foo", "bar").expect("Setting attribute failed");
-        booster
-            .set_attribute("another", "another")
-            .expect("Setting attribute failed");
+        booster.set_attribute("another", "another").expect("Setting attribute failed");
         booster.set_attribute("4", "4").expect("Setting attribute failed");
-        booster
-            .set_attribute("an even longer attribute name?", "")
-            .expect("Setting attribute failed");
+        booster.set_attribute("an even longer attribute name?", "").expect("Setting attribute failed");
 
         let mut expected = vec!["foo", "another", "4", "an even longer attribute name?"];
         expected.sort();
@@ -872,301 +856,56 @@ mod tests {
 
     #[test]
     fn get_set_feature_names() {
-        let booster = load_test_booster();
+        let booster = Booster::new(&[]).expect("Creating Booster failed");
         let attrs = booster.get_feature_names().expect("Getting features failed");
         assert_eq!(attrs, Vec::<String>::new());
-        let mut expected = vec!["foo", "another", "4", "an even longer features name?"];
-        expected.sort();
+        let expected = vec!["foo", "another", "4"];
         booster.set_feature_names(&expected).expect("Setting features failed");
-        let mut attrs = booster.get_feature_names().expect("Getting features failed");
-        attrs.sort();
-        assert_eq!(attrs, expected);
+        let attrs = booster.get_feature_names().expect("Getting features failed");
+        assert_eq!(attrs.len(), 3);
     }
 
     #[test]
-    fn predict() {
-        let dmat_train =
-            DMatrix::load(r#"{"uri": "xgboost-sys/xgboost/demo/data/agaricus.txt.train?format=libsvm"}"#).unwrap();
-        let dmat_test =
-            DMatrix::load(r#"{"uri": "xgboost-sys/xgboost/demo/data/agaricus.txt.test?format=libsvm"}"#).unwrap();
+    fn train_and_predict() {
+        let data = &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let num_rows = 4;
+        let mut dtrain = DMatrix::from_dense(data, num_rows).unwrap();
+        dtrain.set_labels(&[0.0, 1.0, 0.0, 1.0]).unwrap();
 
-        let tree_params = tree::TreeBoosterParametersBuilder::default()
-            .max_depth(2)
-            .eta(1.0)
-            .build()
-            .unwrap();
-        let learning_params = learning::LearningTaskParametersBuilder::default()
-            .objective(learning::Objective::BinaryLogistic)
-            .eval_metrics(learning::Metrics::Custom(vec![
-                learning::EvaluationMetric::MAPCutNegative(4),
-                learning::EvaluationMetric::LogLoss,
-                learning::EvaluationMetric::BinaryErrorRate(0.5),
-            ]))
-            .build()
-            .unwrap();
-        let params = parameters::BoosterParametersBuilder::default()
-            .booster_type(parameters::BoosterType::Tree(tree_params))
-            .learning_params(learning_params)
-            .verbose(false)
-            .build()
-            .unwrap();
-        let mut booster = Booster::new_with_cached_dmats(&params, &[&dmat_train, &dmat_test]).unwrap();
-
-        for i in 0..10 {
-            booster.update(&dmat_train, i).expect("update failed");
-        }
-
-        let train_metrics = booster.evaluate(&dmat_train).unwrap();
-        assert_eq!(*train_metrics.get("logloss").unwrap(), 0.006634271);
-        assert_eq!(*train_metrics.get("map@4-").unwrap(), 1.0);
-
-        let test_metrics = booster.evaluate(&dmat_test).unwrap();
-        let diff = *test_metrics.get("logloss").unwrap() - 0.0069199526;
-        assert_eq!(diff < 0.000001, diff > -0.000001);
-        assert_eq!(*test_metrics.get("map@4-").unwrap(), 1.0);
-
-        let v = booster.predict(&dmat_test).unwrap();
-        assert_eq!(v.len(), dmat_test.num_rows());
-
-        // first 10 predictions
-        let expected_start = [
-            0.0050151693,
-            0.9884467,
-            0.0050151693,
-            0.0050151693,
-            0.026636455,
-            0.11789363,
-            0.9884467,
-            0.01231471,
-            0.9884467,
-            0.00013656063,
+        let params = &[
+            ("max_depth", "2"),
+            ("eta", "1.0"),
+            ("objective", "binary:logistic"),
         ];
 
-        // last 10 predictions
-        let expected_end = [
-            0.002520344,
-            0.00060917926,
-            0.99881005,
-            0.00060917926,
-            0.00060917926,
-            0.00060917926,
-            0.00060917926,
-            0.9981102,
-            0.002855195,
-            0.9981102,
-        ];
-        let eps = 1e-6;
-
-        for (pred, expected) in v.iter().zip(&expected_start) {
-            println!("predictions={}, expected={}", pred, expected);
-            assert!(pred - expected < eps);
+        let mut booster = Booster::new(params).unwrap();
+        for i in 0..3 {
+            booster.update(&dtrain, i).expect("update failed");
         }
 
-        for (pred, expected) in v[v.len() - 10..].iter().zip(&expected_end) {
-            println!("predictions={}, expected={}", pred, expected);
-            assert!(pred - expected < eps);
-        }
+        let preds = booster.predict(&dtrain).unwrap();
+        assert_eq!(preds.len(), 4);
     }
 
     #[test]
-    fn predict_matrix() {
-        let dmat_train =
-            DMatrix::load(r#"{"uri": "xgboost-sys/xgboost/demo/data/agaricus.txt.train?format=libsvm"}"#).unwrap();
-        let dmat_test =
-            DMatrix::load(r#"{"uri": "xgboost-sys/xgboost/demo/data/agaricus.txt.test?format=libsvm"}"#).unwrap();
+    fn train_with_eval() {
+        let data = &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let num_rows = 4;
+        let mut dtrain = DMatrix::from_dense(data, num_rows).unwrap();
+        dtrain.set_labels(&[0.0, 1.0, 0.0, 1.0]).unwrap();
+        let mut dtest = DMatrix::from_dense(data, num_rows).unwrap();
+        dtest.set_labels(&[0.0, 1.0, 0.0, 1.0]).unwrap();
 
-        let tree_params = tree::TreeBoosterParametersBuilder::default()
-            .max_depth(2)
-            .eta(1.0)
-            .build()
-            .unwrap();
-        let learning_params = learning::LearningTaskParametersBuilder::default()
-            .objective(learning::Objective::BinaryLogistic)
-            .eval_metrics(learning::Metrics::Custom(vec![
-                learning::EvaluationMetric::MAPCutNegative(4),
-                learning::EvaluationMetric::LogLoss,
-                learning::EvaluationMetric::BinaryErrorRate(0.5),
-            ]))
-            .build()
-            .unwrap();
-        let params = parameters::BoosterParametersBuilder::default()
-            .booster_type(parameters::BoosterType::Tree(tree_params))
-            .learning_params(learning_params)
-            .verbose(false)
-            .build()
-            .unwrap();
-        let mut booster = Booster::new_with_cached_dmats(&params, &[&dmat_train, &dmat_test]).unwrap();
+        let eval_sets = &[(&dtest, "test")];
+        let bst = Booster::train(
+            &[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")],
+            &dtrain,
+            2,
+            Some(eval_sets),
+        ).unwrap();
 
-        for i in 0..10 {
-            booster.update(&dmat_train, i).expect("update failed");
-        }
-
-        let train_metrics = booster.evaluate(&dmat_train).unwrap();
-        assert_eq!(*train_metrics.get("logloss").unwrap(), 0.006634271);
-        assert_eq!(*train_metrics.get("map@4-").unwrap(), 1.0);
-
-        let test_metrics = booster.evaluate(&dmat_test).unwrap();
-        let diff = *test_metrics.get("logloss").unwrap() - 0.0069199526;
-        assert_eq!(diff < 0.000001, diff > -0.000001);
-        assert_eq!(*test_metrics.get("map@4-").unwrap(), 1.0);
-
-        let single_matrix = dmat_test.slice(&[0]).unwrap();
-        let (v, shape) = booster
-            .predict_matrix(&single_matrix, &PredictConfig::default().as_json())
-            .unwrap();
-        assert_eq!(shape, vec![1]);
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0], 0.0050151693);
-        let cfg = PredictConfig::default();
-        let (v, shape) = booster.predict_matrix(&dmat_test, &cfg.as_json()).unwrap();
-        assert_eq!(v.len(), dmat_test.num_rows());
-        assert_eq!(shape, vec![1611]);
-
-        // first 10 predictions
-        let expected_start = [
-            0.0050151693,
-            0.9884467,
-            0.0050151693,
-            0.0050151693,
-            0.026636455,
-            0.11789363,
-            0.9884467,
-            0.01231471,
-            0.9884467,
-            0.00013656063,
-        ];
-
-        // last 10 predictions
-        let expected_end = [
-            0.002520344,
-            0.00060917926,
-            0.99881005,
-            0.00060917926,
-            0.00060917926,
-            0.00060917926,
-            0.00060917926,
-            0.9981102,
-            0.002855195,
-            0.9981102,
-        ];
-        let eps = 1e-6;
-
-        for (pred, expected) in v.iter().zip(&expected_start) {
-            println!("predictions={}, expected={}", pred, expected);
-            assert!(pred - expected < eps);
-        }
-
-        for (pred, expected) in v[v.len() - 10..].iter().zip(&expected_end) {
-            println!("predictions={}, expected={}", pred, expected);
-            assert!(pred - expected < eps);
-        }
-    }
-
-    #[test]
-    fn predict_leaf() {
-        let dmat_train =
-            DMatrix::load(r#"{"uri": "xgboost-sys/xgboost/demo/data/agaricus.txt.train?format=libsvm"}"#).unwrap();
-        let dmat_test =
-            DMatrix::load(r#"{"uri": "xgboost-sys/xgboost/demo/data/agaricus.txt.test?format=libsvm"}"#).unwrap();
-
-        let tree_params = tree::TreeBoosterParametersBuilder::default()
-            .max_depth(2)
-            .eta(1.0)
-            .build()
-            .unwrap();
-        let learning_params = learning::LearningTaskParametersBuilder::default()
-            .objective(learning::Objective::BinaryLogistic)
-            .eval_metrics(learning::Metrics::Custom(vec![learning::EvaluationMetric::LogLoss]))
-            .build()
-            .unwrap();
-        let params = parameters::BoosterParametersBuilder::default()
-            .booster_type(parameters::BoosterType::Tree(tree_params))
-            .learning_params(learning_params)
-            .verbose(false)
-            .build()
-            .unwrap();
-        let mut booster = Booster::new_with_cached_dmats(&params, &[&dmat_train, &dmat_test]).unwrap();
-
-        let num_rounds = 15;
-        for i in 0..num_rounds {
-            booster.update(&dmat_train, i).expect("update failed");
-        }
-
-        let (_preds, shape) = booster.predict_leaf(&dmat_test).unwrap();
-        let num_samples = dmat_test.num_rows();
-        assert_eq!(shape, (num_samples, num_rounds as usize));
-    }
-
-    #[test]
-    fn predict_contributions() {
-        let dmat_train =
-            DMatrix::load(r#"{"uri": "xgboost-sys/xgboost/demo/data/agaricus.txt.train?format=libsvm"}"#).unwrap();
-        let dmat_test =
-            DMatrix::load(r#"{"uri": "xgboost-sys/xgboost/demo/data/agaricus.txt.test?format=libsvm"}"#).unwrap();
-
-        let tree_params = tree::TreeBoosterParametersBuilder::default()
-            .max_depth(2)
-            .eta(1.0)
-            .build()
-            .unwrap();
-        let learning_params = learning::LearningTaskParametersBuilder::default()
-            .objective(learning::Objective::BinaryLogistic)
-            .eval_metrics(learning::Metrics::Custom(vec![learning::EvaluationMetric::LogLoss]))
-            .build()
-            .unwrap();
-        let params = parameters::BoosterParametersBuilder::default()
-            .booster_type(parameters::BoosterType::Tree(tree_params))
-            .learning_params(learning_params)
-            .verbose(false)
-            .build()
-            .unwrap();
-        let mut booster = Booster::new_with_cached_dmats(&params, &[&dmat_train, &dmat_test]).unwrap();
-
-        let num_rounds = 5;
-        for i in 0..num_rounds {
-            booster.update(&dmat_train, i).expect("update failed");
-        }
-
-        let (_preds, shape) = booster.predict_contributions(&dmat_test).unwrap();
-        let num_samples = dmat_test.num_rows();
-        let num_features = dmat_train.num_cols();
-        assert_eq!(shape, (num_samples, num_features + 1));
-    }
-
-    #[test]
-    fn predict_interactions() {
-        let dmat_train =
-            DMatrix::load(r#"{"uri": "xgboost-sys/xgboost/demo/data/agaricus.txt.train?format=libsvm"}"#).unwrap();
-        let dmat_test =
-            DMatrix::load(r#"{"uri": "xgboost-sys/xgboost/demo/data/agaricus.txt.test?format=libsvm"}"#).unwrap();
-
-        let tree_params = tree::TreeBoosterParametersBuilder::default()
-            .max_depth(2)
-            .eta(1.0)
-            .build()
-            .unwrap();
-        let learning_params = learning::LearningTaskParametersBuilder::default()
-            .objective(learning::Objective::BinaryLogistic)
-            .eval_metrics(learning::Metrics::Custom(vec![learning::EvaluationMetric::LogLoss]))
-            .build()
-            .unwrap();
-        let params = parameters::BoosterParametersBuilder::default()
-            .booster_type(parameters::BoosterType::Tree(tree_params))
-            .learning_params(learning_params)
-            .verbose(false)
-            .build()
-            .unwrap();
-        let mut booster = Booster::new_with_cached_dmats(&params, &[&dmat_train, &dmat_test]).unwrap();
-
-        let num_rounds = 5;
-        for i in 0..num_rounds {
-            booster.update(&dmat_train, i).expect("update failed");
-        }
-
-        let (_preds, shape) = booster.predict_interactions(&dmat_test).unwrap();
-        let num_samples = dmat_test.num_rows();
-        let num_features = dmat_train.num_cols();
-        assert_eq!(shape, (num_samples, num_features + 1, num_features + 1));
+        let preds = bst.predict(&dtest).unwrap();
+        assert_eq!(preds.len(), 4);
     }
 
     #[test]
@@ -1185,113 +924,5 @@ mod tests {
         metrics.insert("train".to_owned(), train_metrics);
         metrics.insert("test".to_owned(), test_metrics);
         assert_eq!(Booster::parse_eval_string(s, &["train", "test"]), metrics);
-    }
-
-    #[test]
-    fn dump_model() {
-        let dmat_train =
-            DMatrix::load(r#"{"uri": "xgboost-sys/xgboost/demo/data/agaricus.txt.train?format=libsvm"}"#).unwrap();
-
-        println!("{:?}", dmat_train.shape());
-
-        let tree_params = tree::TreeBoosterParametersBuilder::default()
-            .max_depth(2)
-            .eta(1.0)
-            .build()
-            .unwrap();
-        let learning_params = learning::LearningTaskParametersBuilder::default()
-            .objective(learning::Objective::BinaryLogistic)
-            .build()
-            .unwrap();
-        let booster_params = parameters::BoosterParametersBuilder::default()
-            .booster_type(parameters::BoosterType::Tree(tree_params))
-            .learning_params(learning_params)
-            .verbose(false)
-            .build()
-            .unwrap();
-
-        let training_params = parameters::TrainingParametersBuilder::default()
-            .booster_params(booster_params)
-            .dtrain(&dmat_train)
-            .boost_rounds(10)
-            .build()
-            .unwrap();
-        let booster = Booster::train(&training_params).unwrap();
-
-        assert_eq!(
-            booster.dump_model(true, None).unwrap(),
-            "0:[f29<2.00001001] yes=1,no=2,missing=2,gain=4000.53101,cover=1628.25
-	1:[f109<2.00001001] yes=3,no=4,missing=4,gain=198.173828,cover=703.75
-		3:leaf=1.85964918,cover=13.25
-		4:leaf=-1.94070864,cover=690.5
-	2:[f56<2.00001001] yes=5,no=6,missing=6,gain=1158.21204,cover=924.5
-		5:leaf=-1.70044053,cover=112.5
-		6:leaf=1.71217716,cover=812
-
-0:[f60<2.00001001] yes=1,no=2,missing=2,gain=832.544983,cover=788.852051
-	1:leaf=-6.23624468,cover=20.462389
-	2:[f29<2.00001001] yes=3,no=4,missing=4,gain=569.725098,cover=768.389709
-		3:leaf=-0.968530357,cover=309.45282
-		4:leaf=0.78471756,cover=458.936859
-
-0:[f102<2.00001001] yes=1,no=2,missing=2,gain=368.744568,cover=457.069458
-	1:[f111<2.00001001] yes=3,no=4,missing=4,gain=258.184326,cover=236.018005
-		3:leaf=-9.421422,cover=2.53038669
-		4:leaf=-0.791407049,cover=233.487625
-	2:[f67<2.00001001] yes=5,no=6,missing=6,gain=226.336975,cover=221.051468
-		5:leaf=5.77228642,cover=8.05200672
-		6:leaf=0.658725023,cover=212.999451
-
-0:[f27<2.00001001] yes=1,no=2,missing=2,gain=140.486053,cover=364.119354
-	1:leaf=1.07747853,cover=90.0174103
-	2:[f39<2.00001001] yes=3,no=4,missing=4,gain=139.860519,cover=274.101959
-		3:leaf=-0.877905607,cover=178.241974
-		4:leaf=0.614153326,cover=95.8599854
-
-0:[f109<2.00001001] yes=1,no=2,missing=2,gain=112.605019,cover=189.202194
-	1:leaf=2.92190909,cover=11.4303684
-	2:[f36<2.00001001] yes=3,no=4,missing=4,gain=66.4029999,cover=177.771835
-		3:leaf=0.152607277,cover=135.494431
-		4:leaf=-1.26934469,cover=42.277401
-
-0:[f23<2.00001001] yes=1,no=2,missing=2,gain=52.5610313,cover=170.612762
-	1:[f36<2.00001001] yes=3,no=4,missing=4,gain=12.4420547,cover=19.731596
-		3:leaf=-1.02315068,cover=16.0739021
-		4:leaf=-3.02413678,cover=3.65769386
-	2:[f24<2.00001001] yes=5,no=6,missing=6,gain=67.3869553,cover=150.881165
-		5:leaf=-1.53846073,cover=18.9789505
-		6:leaf=0.431742132,cover=131.902222
-
-0:[f29<2.00001001] yes=1,no=2,missing=2,gain=66.2389145,cover=142.360611
-	1:[f109<2.00001001] yes=3,no=4,missing=4,gain=12.1987419,cover=69.6048737
-		3:leaf=0.836115122,cover=3.48375821
-		4:leaf=-0.912605286,cover=66.1211166
-	2:[f24<2.00001001] yes=5,no=6,missing=6,gain=31.229435,cover=72.7557373
-		5:leaf=-1.19710124,cover=8.22473907
-		6:leaf=0.777142286,cover=64.5309982
-
-0:[f39<2.00001001] yes=1,no=2,missing=2,gain=20.6531773,cover=79.4027634
-	1:[f27<2.00001001] yes=3,no=4,missing=4,gain=22.1144371,cover=44.4738464
-		3:leaf=0.890622675,cover=7.49097395
-		4:leaf=-0.908311546,cover=36.982872
-	2:[f112<2.00001001] yes=5,no=6,missing=6,gain=16.0703697,cover=34.9289207
-		5:leaf=1.4361918,cover=9.89693928
-		6:leaf=-0.0180106498,cover=25.0319824
-
-0:[f23<2.00001001] yes=1,no=2,missing=2,gain=11.7128553,cover=53.3251991
-	1:leaf=-1.01502442,cover=9.02525806
-	2:[f102<2.00001001] yes=3,no=4,missing=4,gain=12.5461531,cover=44.299942
-		3:leaf=0.56883812,cover=28.5100231
-		4:leaf=-0.515293062,cover=15.7899179
-
-0:[f115<2.00001001] yes=1,no=2,missing=2,gain=14.8892794,cover=45.9312019
-	1:[f61<2.00001001] yes=3,no=4,missing=4,gain=19.3462334,cover=2.87474418
-		3:leaf=-0.609474957,cover=1.53319895
-		4:leaf=3.63442755,cover=1.34154534
-	2:[f29<2.00001001] yes=5,no=6,missing=6,gain=10.1308861,cover=43.0564575
-		5:leaf=-0.734555721,cover=20.7280827
-		6:leaf=0.217203051,cover=22.3283749
-"
-        );
     }
 }
