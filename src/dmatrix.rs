@@ -359,7 +359,9 @@ impl DMatrix {
 
 impl Drop for DMatrix {
     fn drop(&mut self) {
-        xgb_call!(xgboost_sys::XGDMatrixFree(self.handle)).unwrap();
+        if let Err(e) = xgb_call!(xgboost_sys::XGDMatrixFree(self.handle)) {
+            error!("XGDMatrixFree failed in drop: {}", e);
+        }
     }
 }
 

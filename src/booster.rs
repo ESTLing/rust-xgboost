@@ -732,7 +732,9 @@ impl Booster {
 
 impl Drop for Booster {
     fn drop(&mut self) {
-        xgb_call!(xgboost_sys::XGBoosterFree(self.handle)).unwrap();
+        if let Err(e) = xgb_call!(xgboost_sys::XGBoosterFree(self.handle)) {
+            error!("XGBoosterFree failed in drop: {}", e);
+        }
     }
 }
 
