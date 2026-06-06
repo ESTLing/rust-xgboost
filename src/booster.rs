@@ -7,12 +7,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{ffi, fmt, fs::File, ptr, slice};
 
-use indexmap::IndexMap;
-
 use super::XGBResult;
-use crate::parameters::{BoosterParameters, TrainingParameters};
-
-pub type CustomObjective = fn(&[f32], &DMatrix) -> (Vec<f32>, Vec<f32>);
 
 /// Used to control the return type of predictions made by C Booster API.
 enum PredictOption {
@@ -91,31 +86,21 @@ pub struct Booster {
 }
 
 impl Booster {
-    /// Create a new Booster model with given parameters.
+    /// Create a new Booster with given parameters.
     ///
-    /// This model can then be trained using calls to update/boost as appropriate.
-    ///
-    /// The [`train`](struct.Booster.html#method.train)  function is often a more convenient way of constructing,
-    /// training and evaluating a Booster in a single call.
-    pub fn new(params: &BoosterParameters) -> XGBResult<Self> {
-        Self::new_with_cached_dmats(params, &[])
-    }
-
-    /// Create a new Booster model with given parameters and list of DMatrix to cache.
-    ///
-    /// Cached DMatrix can sometimes be used internally by XGBoost to speed up certain operations.
-    pub fn new_with_cached_dmats(params: &BoosterParameters, dmats: &[&DMatrix]) -> XGBResult<Self> {
+    /// Parameters are key-value string pairs, e.g. `&[("max_depth", "6"), ("eta", "0.3")]`.
+    pub fn new(params: &[(&str, &str)]) -> XGBResult<Self> {
         let mut handle = ptr::null_mut();
-        // TODO: check this is safe if any dmats are freed
-        let s: Vec<xgboost_sys::DMatrixHandle> = dmats.iter().map(|x| x.handle).collect();
         xgb_call!(xgboost_sys::XGBoosterCreate(
-            s.as_ptr(),
-            dmats.len() as u64,
+            ptr::null(),
+            0,
             &mut handle
         ))?;
 
         let mut booster = Booster { handle };
-        booster.set_params(params)?;
+        for (key, value) in params {
+            booster.set_param(key, value)?;
+        }
         Ok(booster)
     }
 
@@ -173,63 +158,34 @@ impl Booster {
         Ok(Booster { handle })
     }
 
-    /// Convenience function for creating/training a new Booster.
+    /// Train a new Booster model.
     ///
-    /// This does the following:
-    ///
-    /// 1. create a new Booster model with given parameters
-    /// 2. train the model with given DMatrix
-    /// 3. print out evaluation results for each training round
-    /// 4. return trained Booster
-    ///
-    /// * `params` - training parameters
-    /// * `dtrain` - matrix to train Booster with
-    /// * `num_boost_round` - number of training iterations
-    /// * `eval_sets` - list of datasets to evaluate after each boosting round
-    pub fn train(params: &TrainingParameters) -> XGBResult<Self> {
-        let cached_dmats = {
-            let mut dmats = vec![params.dtrain];
-            if let Some(eval_sets) = params.evaluation_sets {
-                for (dmat, _) in eval_sets {
-                    dmats.push(*dmat);
-                }
-            }
-            dmats
-        };
+    /// * `params` - XGBoost parameters as key-value string pairs
+    /// * `dtrain` - training data matrix
+    /// * `boost_rounds` - number of boosting iterations
+    /// * `eval_sets` - optional evaluation datasets with names
+    pub fn train(
+        params: &[(&str, &str)],
+        dtrain: &DMatrix,
+        boost_rounds: u32,
+        eval_sets: Option<&[(&DMatrix, &str)]>,
+    ) -> XGBResult<Self> {
+        let mut bst = Booster::new(params)?;
 
-        let mut bst = Booster::new_with_cached_dmats(&params.booster_params, &cached_dmats)?;
-        for i in 0..params.boost_rounds as i32 {
-            debug!("Updating in round: {}", i);
-            if let Some(objective_fn) = params.custom_objective_fn {
-                bst.update_custom(params.dtrain, objective_fn)?;
-            } else {
-                bst.update(params.dtrain, i)?;
-            }
+        for i in 0..boost_rounds as i32 {
+            bst.update(dtrain, i)?;
 
-            if let Some(eval_sets) = params.evaluation_sets {
-                let mut dmat_eval_results = bst.eval_set(eval_sets, i)?;
-
-                if let Some(eval_fn) = params.custom_evaluation_fn {
-                    let eval_name = "custom";
-                    for (dmat, dmat_name) in eval_sets {
-                        let margin = bst.predict_margin(dmat)?;
-                        let eval_result = eval_fn(&margin, dmat);
-                        let eval_results = dmat_eval_results
-                            .entry(eval_name.to_string())
-                            .or_insert_with(IndexMap::new);
-                        eval_results.insert(dmat_name.to_string(), eval_result);
-                    }
-                }
-
-                // convert to map of eval_name -> (dmat_name -> score)
+            if let Some(eval_sets) = eval_sets {
+                let dmat_eval_results = bst.eval_set(eval_sets, i)?;
                 let mut eval_dmat_results = BTreeMap::new();
                 for (dmat_name, eval_results) in &dmat_eval_results {
                     for (eval_name, result) in eval_results {
-                        let dmat_results = eval_dmat_results.entry(eval_name).or_insert_with(BTreeMap::new);
+                        let dmat_results = eval_dmat_results
+                            .entry(eval_name)
+                            .or_insert_with(BTreeMap::new);
                         dmat_results.insert(dmat_name, result);
                     }
                 }
-
                 print!("[{}]", i);
                 for (eval_name, dmat_results) in eval_dmat_results {
                     for (dmat_name, result) in dmat_results {
@@ -241,15 +197,6 @@ impl Booster {
         }
 
         Ok(bst)
-    }
-
-    /// Update this Booster's parameters.
-    pub fn set_params(&mut self, p: &BoosterParameters) -> XGBResult<()> {
-        for (key, value) in p.as_string_pairs() {
-            debug!("Setting parameter: {}={}", &key, &value);
-            self.set_param(&key, &value)?;
-        }
-        Ok(())
     }
 
     /// Update this model by training it for one round with given training matrix.
@@ -266,48 +213,11 @@ impl Booster {
         ))
     }
 
-    /// Update this model by training it for one round with a custom objective function.
-    pub fn update_custom(&mut self, dtrain: &DMatrix, objective_fn: CustomObjective) -> XGBResult<()> {
-        let pred = self.predict(dtrain)?;
-        let (gradient, hessian) = objective_fn(&pred.to_vec(), dtrain);
-        self.boost(dtrain, &gradient, &hessian)
-    }
-
-    /// Update this model by directly specifying the first and second order gradients.
-    ///
-    /// This is typically used instead of `update` when using a customised loss function.
-    ///
-    /// * `dtrain` - matrix to train the model with for a single iteration
-    /// * `gradient` - first order gradient
-    /// * `hessian` - second order gradient
-    fn boost(&mut self, dtrain: &DMatrix, gradient: &[f32], hessian: &[f32]) -> XGBResult<()> {
-        if gradient.len() != hessian.len() {
-            let msg = format!(
-                "Mismatch between length of gradient and hessian arrays ({} != {})",
-                gradient.len(),
-                hessian.len()
-            );
-            return Err(XGBError::new(msg));
-        }
-        assert_eq!(gradient.len(), hessian.len());
-
-        // TODO: _validate_feature_names
-        let mut grad_vec = gradient.to_vec();
-        let mut hess_vec = hessian.to_vec();
-        xgb_call!(xgboost_sys::XGBoosterBoostOneIter(
-            self.handle,
-            dtrain.handle,
-            grad_vec.as_mut_ptr(),
-            hess_vec.as_mut_ptr(),
-            grad_vec.len() as u64
-        ))
-    }
-
     fn eval_set(
         &self,
         evals: &[(&DMatrix, &str)],
         iteration: i32,
-    ) -> XGBResult<IndexMap<String, IndexMap<String, f32>>> {
+    ) -> XGBResult<HashMap<String, HashMap<String, f32>>> {
         let (dmats, names) = {
             let mut dmats = Vec::with_capacity(evals.len());
             let mut names = Vec::with_capacity(evals.len());
@@ -739,8 +649,8 @@ impl Booster {
         ))
     }
 
-    fn parse_eval_string(eval: &str, evnames: &[&str]) -> IndexMap<String, IndexMap<String, f32>> {
-        let mut result: IndexMap<String, IndexMap<String, f32>> = IndexMap::new();
+    fn parse_eval_string(eval: &str, evnames: &[&str]) -> HashMap<String, HashMap<String, f32>> {
+        let mut result: HashMap<String, HashMap<String, f32>> = HashMap::new();
 
         debug!("Parsing evaluation line: {}", &eval);
         for part in eval.split('\t').skip(1) {
@@ -1262,13 +1172,13 @@ mod tests {
     #[test]
     fn parse_eval_string() {
         let s = "[0]\ttrain-map@4-:0.5\ttrain-logloss:1.0\ttest-map@4-:0.25\ttest-logloss:0.75";
-        let mut metrics = IndexMap::new();
+        let mut metrics = HashMap::new();
 
-        let mut train_metrics = IndexMap::new();
+        let mut train_metrics = HashMap::new();
         train_metrics.insert("map@4-".to_owned(), 0.5);
         train_metrics.insert("logloss".to_owned(), 1.0);
 
-        let mut test_metrics = IndexMap::new();
+        let mut test_metrics = HashMap::new();
         test_metrics.insert("map@4-".to_owned(), 0.25);
         test_metrics.insert("logloss".to_owned(), 0.75);
 

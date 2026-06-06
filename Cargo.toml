@@ -13,10 +13,8 @@ edition = "2021"
 [dependencies]
 xgboost-sys = { package = "xgboost_lib-sys", path = "xgboost-sys", version = "3.0.4" }
 libc = "0.2"
-derive_builder = "0.20"
 log = "0.4"
 tempfile = "3.15"
-indexmap = "2.7"
 
 [features]
 default = []
