@@ -1,4 +1,4 @@
-name: Macos
+name: macOS
 
 on: [push, pull_request]
 
@@ -12,11 +12,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-      with:
-        submodules: recursive
-        
-    - name: Install dependencies
-      run: brew install libomp
 
     - name: Build
       run: cargo build --verbose

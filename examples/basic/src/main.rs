@@ -1,129 +1,73 @@
-extern crate xgb;
-extern crate sprs;
-extern crate env_logger;
-
-use std::io::{BufRead, BufReader};
-use std::fs::File;
-use xgb::{parameters, DMatrix, Booster};
+use xgb::{DMatrix, Booster};
 
 fn main() {
-    // initialise logging, run with e.g. RUST_LOG=xgboost=debug to see more details
     env_logger::init();
 
-    // load train and test matrices from text files (in LibSVM format).
-    println!("Loading train and test matrices...");
-    let dtrain = DMatrix::load(r#"{"uri": "../../xgboost-sys/xgboost/demo/data/agaricus.txt.train?format=libsvm"}"#).unwrap();
+    // Create a simple synthetic dataset: 8 rows, 3 features
+    let data = &[
+        1.0, 2.0, 3.0,
+        4.0, 5.0, 6.0,
+        7.0, 8.0, 9.0,
+        1.1, 2.1, 3.1,
+        4.1, 5.1, 6.1,
+        7.1, 8.1, 9.1,
+        1.2, 2.2, 3.2,
+        4.2, 5.2, 6.2,
+    ];
+    let num_rows = 8;
+    let mut dtrain = DMatrix::from_dense(data, num_rows).unwrap();
+    dtrain.set_labels(&[0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]).unwrap();
     println!("Train matrix: {}x{}", dtrain.num_rows(), dtrain.num_cols());
-    let dtest = DMatrix::load(r#"{"uri": "../../xgboost-sys/xgboost/demo/data/agaricus.txt.test?format=libsvm"}"#).unwrap();
-    println!("Test matrix: {}x{}", dtest.num_rows(), dtest.num_cols());
 
-    // configure objectives, metrics, etc.
-    let learning_params = parameters::learning::LearningTaskParametersBuilder::default()
-        .objective(parameters::learning::Objective::BinaryLogistic)
-        .build().unwrap();
+    let mut dtest = DMatrix::from_dense(data, num_rows).unwrap();
+    dtest.set_labels(&[0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]).unwrap();
 
-    // configure the tree-based learning model's parameters
-    let tree_params = parameters::tree::TreeBoosterParametersBuilder::default()
-            .max_depth(2)
-            .eta(1.0)
-            .build().unwrap();
-
-    // overall configuration for Booster
-    let booster_params = parameters::BoosterParametersBuilder::default()
-        .booster_type(parameters::BoosterType::Tree(tree_params))
-        .learning_params(learning_params)
-        .verbose(true)
-        .build().unwrap();
-
-    // specify datasets to evaluate against during training
-    let evaluation_sets = [(&dtest, "test"), (&dtrain, "train")];
-
-    // overall configuration for training/evaluation
-    let training_params = parameters::TrainingParametersBuilder::default()
-        .dtrain(&dtrain)                         // dataset to train with
-        .boost_rounds(2)                         // number of training iterations
-        .booster_params(booster_params)          // model parameters
-        .evaluation_sets(Some(&evaluation_sets)) // optional datasets to evaluate against in each iteration
-        .build().unwrap();
-
-    // train booster model, and print evaluation metrics
+    // Train using flat string key-value parameters (like Python's xgb.train)
+    let eval_sets = &[(&dtest, "test"), (&dtrain, "train")];
     println!("\nTraining tree booster...");
-    let booster = Booster::train(&training_params).unwrap();
+    let booster = Booster::train(
+        &[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")],
+        &dtrain,
+        10,
+        Some(eval_sets),
+    ).unwrap();
 
-    // get predictions probabilities for given matrix
+    // Predict
     let preds = booster.predict(&dtest).unwrap();
+    println!("Predictions: {:?}", &preds[..4]);
 
-    // get predicted labels for each test example (i.e. 0 or 1)
-    println!("\nChecking predictions...");
-    let labels = dtest.get_labels().unwrap();
-    println!("First 3 predicted labels: {} {} {}", labels[0], labels[1], labels[2]);
-
-    // print error rate
-    let num_correct: usize = preds.iter()
-        .map(|&v| if v > 0.5 { 1 } else { 0 })
-        .sum();
-    println!("error={} ({}/{} correct)", num_correct as f32 / preds.len() as f32, num_correct, preds.len());
-
-    // save and load model file
+    // Save and load
     println!("\nSaving and loading Booster model...");
     booster.save("xgb.json").unwrap();
-    let booster = Booster::load("xgb.json").unwrap();
-    let preds2 = booster.predict(&dtest).unwrap();
+    let booster2 = Booster::load("xgb.json").unwrap();
+    let preds2 = booster2.predict(&dtest).unwrap();
     assert_eq!(preds, preds2);
 
-    // save and load data matrix file
+    // Save and load DMatrix
     println!("\nSaving and loading matrix data...");
     dtest.save("test.dmat").unwrap();
     let dtest2 = DMatrix::load_binary("test.dmat").unwrap();
     assert_eq!(booster.predict(&dtest2).unwrap(), preds);
 
-    // error handling example
+    // Error handling
     println!("\nError message example...");
-    let result = Booster::load("/does/not/exist");
-    match result {
-        Ok(_booster) => (),
+    match Booster::load("/does/not/exist") {
         Err(err) => println!("Got expected error: {}", err),
+        _ => (),
     }
 
-    // sparse matrix usage
+    // Sparse matrix (CSR)
     println!("\nSparse matrix construction...");
-
-    // f32 label for each row of data
-    let mut labels = Vec::new();
-
-    // construct sparse matrix in triplet format, then convert to CSR/CSC later
-    let mut rows = Vec::new();
-    let mut cols = Vec::new();
-    let mut data = Vec::new();
-
-    let reader = BufReader::new(File::open("../../xgboost-sys/xgboost/demo/data/agaricus.txt.train").unwrap());
-    let mut current_row = 0;
-    for line in reader.lines() {
-        let line = line.unwrap();
-        let sample: Vec<&str> = line.split_whitespace().collect();
-        labels.push(sample[0].parse::<f32>().unwrap());
-
-        for entry in &sample[1..] {
-            let pair: Vec<&str> = entry.split(':').collect();
-            rows.push(current_row);
-            cols.push(pair[0].parse::<usize>().unwrap());
-            data.push(pair[1].parse::<f32>().unwrap());
-        }
-
-        current_row += 1;
-    }
-
-    // work out size of sparse matrix from max row/col values
-    let shape = ((*rows.iter().max().unwrap() + 1) as usize,
-                 (*cols.iter().max().unwrap() + 1) as usize);
-    let num_col = Some((*cols.iter().max().unwrap() + 1) as usize);
-    let triplet_mat = sprs::TriMatBase::from_triplets(shape, rows, cols, data);
-    let csr_mat = triplet_mat.to_csr();
-
-    let indices: Vec<usize> = csr_mat.indices().into_iter().map(|i| *i as usize).collect();
-    let mut dtrain = DMatrix::from_csr(csr_mat.indptr().raw_storage(), &indices, csr_mat.data(), num_col).unwrap();
-    dtrain.set_labels(&labels).unwrap();
-
-    let training_params = parameters::TrainingParametersBuilder::default().dtrain(&dtrain).build().unwrap();
-    let _ = Booster::train(&training_params).unwrap();
+    let indptr = &[0, 2, 3, 4];
+    let indices = &[0, 2, 2, 1];
+    let sparse_data = &[1.0, 2.0, 3.0, 4.0];
+    let mut dmat = DMatrix::from_csr(indptr, indices, sparse_data, Some(3)).unwrap();
+    dmat.set_labels(&[0.0, 1.0, 0.0]).unwrap();
+    let bst = Booster::train(
+        &[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")],
+        &dmat,
+        2,
+        None,
+    ).unwrap();
+    println!("CSR predictions: {:?}", bst.predict(&dmat).unwrap());
 }
