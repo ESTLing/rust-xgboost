@@ -43,6 +43,13 @@ XGBoost 3.2+ C API expects `__array_interface__` JSON (Python numpy protocol) fo
 `XGDMatrixCreateFromDense`/`CreateFromCSR`/`CreateFromCSC` take JSON strings containing
 memory pointers and shape info, not raw float/int pointers.
 
+## Reference implementation
+
+The Python XGBoost package at `../simq/.venv/Lib/site-packages/xgboost` serves as
+the authoritative reference for API design and behavioral details. When unsure about
+parameter semantics, method signatures, return conventions, or edge-case handling,
+consult the Python implementation first.
+
 ## Project conventions
 
 - **Language**: All docs, comments, and commit messages in English

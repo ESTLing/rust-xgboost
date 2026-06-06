@@ -214,16 +214,24 @@ impl DMatrix {
     pub fn load<P: AsRef<Path>>(path: P) -> XGBResult<Self> {
         debug!("Loading DMatrix from: {}", path.as_ref().display());
         let mut handle = ptr::null_mut();
-        let fname = crate::path_to_c_str(path);
-        xgb_call!(xgboost_sys::XGDMatrixCreateFromURI(fname.as_ptr(), &mut handle))?;
+        let config = serde_json::json!({
+            "uri": path.as_ref().to_string_lossy(),
+            "silent": 1,
+        });
+        let config_cstr = ffi::CString::new(config.to_string()).unwrap();
+        xgb_call!(xgboost_sys::XGDMatrixCreateFromURI(config_cstr.as_ptr(), &mut handle))?;
         DMatrix::new(handle)
     }
 
     pub fn load_binary<P: AsRef<Path>>(path: P) -> XGBResult<Self> {
         debug!("Loading DMatrix from: {}", path.as_ref().display());
         let mut handle = ptr::null_mut();
-        let fname = crate::path_to_c_str(path);
-        xgb_call!(xgboost_sys::XGDMatrixCreateFromFile(fname.as_ptr(), 1, &mut handle)).unwrap();
+        let config = serde_json::json!({
+            "uri": path.as_ref().to_string_lossy(),
+            "silent": 1,
+        });
+        let config_cstr = ffi::CString::new(config.to_string()).unwrap();
+        xgb_call!(xgboost_sys::XGDMatrixCreateFromURI(config_cstr.as_ptr(), &mut handle))?;
         DMatrix::new(handle)
     }
 

@@ -1,9 +1,0 @@
-[package]
-name = "xgboost-generalised-linear-model-example"
-version = "0.1.0"
-publish = false
-
-[dependencies]
-xgboost-rs = { path = "../../" }
-log = "0.4"
-env_logger = "0.11"
