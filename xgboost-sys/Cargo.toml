@@ -9,21 +9,20 @@ repository = "https://github.com/marcomq/rust-xgboost"
 description = "Native bindings to the xgboost library"
 readme = "README.md"
 edition = "2021"
-exclude = [
-    "lib/*",
-]
 
 [dependencies]
 libc = "0.2"
 
 [build-dependencies]
 bindgen = { version = "0.71" }
-dunce =  { version = "1.0.5" }
-reqwest = { version = "0.12.15", features = ["blocking"], optional = true }
-cmake = { version = "0.1", optional = true } 
+ureq = "2.9"
+zip = "2.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
 
 [features]
-default = ["use_prebuilt_xgb"]
-use_prebuilt_xgb = ["reqwest"]
-local_build = ["cmake"]
-cuda = []
+default = []
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
