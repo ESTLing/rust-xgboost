@@ -58,6 +58,20 @@ consult the Python implementation first.
 - **XGBoost version**: Default 3.2.0, overridable via `XGBOOST_VERSION` env var
 - **Safety**: No `unwrap()` in Drop impls, no `assert!` for null checks in release builds
 
+## Rustdoc conventions
+
+Reference: [rustdoc how-to](https://rustwiki.org/zh-CN/rustdoc/how-to-write-documentation.html).
+
+- **All public items MUST be documented** — modules, structs, functions, macros.
+- **Structure**: one-line summary → detailed explanation → code example → advanced notes.
+- **Code examples** must be copy-paste runnable with `use` statements, under `// Examples` section.
+- **`Panics` section**: document when the function may panic (edge cases, preconditions).
+- **`Errors` section**: document error conditions for fallible functions returning `Result`.
+- **`Safety` section**: required for all `unsafe` functions, explaining preconditions.
+- **Links**: use `[item_name]` for internal links; types in signatures are auto-linked.
+- **Anti-patterns**: don't document only for experts, don't omit edge cases, don't leave public API bare.
+- **Line length**: prefer concise summaries (one sentence first line), avoid redundant type documentation.
+
 ## File map
 
 ```
