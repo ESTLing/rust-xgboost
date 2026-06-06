@@ -343,7 +343,12 @@ impl Booster {
             dmats.len() as u64,
             &mut out_result
         ))?;
-        let out = unsafe { ffi::CStr::from_ptr(out_result).to_str().unwrap().to_owned() };
+        let out = unsafe {
+            ffi::CStr::from_ptr(out_result)
+                .to_str()
+                .map_err(|e| XGBError::new(format!("eval output not valid UTF-8: {}", e)))?
+                .to_owned()
+        };
         Ok(Booster::parse_eval_string(&out, &names))
     }
 
@@ -380,7 +385,9 @@ impl Booster {
         assert!(success == 1);
 
         let c_str: &ffi::CStr = unsafe { ffi::CStr::from_ptr(out_buf) };
-        let out = c_str.to_str().unwrap();
+        let out = c_str
+            .to_str()
+            .map_err(|e| XGBError::new(format!("attribute not valid UTF-8: {}", e)))?;
         Ok(Some(out.to_owned()))
     }
 
@@ -400,7 +407,12 @@ impl Booster {
             let out_ptr_slice = unsafe { slice::from_raw_parts(out, out_len as usize) };
             let out_vec = out_ptr_slice
                 .iter()
-                .map(|str_ptr| unsafe { ffi::CStr::from_ptr(*str_ptr).to_str().unwrap().to_owned() })
+                .map(|str_ptr| unsafe {
+                ffi::CStr::from_ptr(*str_ptr)
+                    .to_str()
+                    .map(|s| s.to_owned())
+                    .map_err(|e| XGBError::new(format!("attribute name not valid UTF-8: {}", e)))
+            })
                 .collect();
             Ok(out_vec)
         } else {
@@ -428,7 +440,12 @@ impl Booster {
             let out_ptr_slice = unsafe { slice::from_raw_parts(out, out_len as usize) };
             let out_vec = out_ptr_slice
                 .iter()
-                .map(|str_ptr| unsafe { ffi::CStr::from_ptr(*str_ptr).to_str().unwrap().to_owned() })
+                .map(|str_ptr| unsafe {
+                ffi::CStr::from_ptr(*str_ptr)
+                    .to_str()
+                    .map(|s| s.to_owned())
+                    .map_err(|e| XGBError::new(format!("attribute name not valid UTF-8: {}", e)))
+            })
                 .collect();
             Ok(out_vec)
         } else {
@@ -484,7 +501,9 @@ impl Booster {
             &mut out_shape_dim,
             &mut out_result
         ))?;
-        assert!(!out_result.is_null());
+        if out_result.is_null() {
+            return Err(XGBError::new("predict_matrix: null result pointer".to_string()));
+        }
         let shape = unsafe { slice::from_raw_parts(out_shape, out_shape_dim as usize).to_vec() };
         let mut data_size = 1;
         for dim in &shape {
@@ -514,7 +533,9 @@ impl Booster {
             &mut out_result
         ))?;
 
-        assert!(!out_result.is_null());
+        if out_result.is_null() {
+            return Err(XGBError::new("predict: null result pointer".to_string()));
+        }
         let data = unsafe { slice::from_raw_parts(out_result, out_len as usize).to_vec() };
         Ok(data)
     }
@@ -536,7 +557,9 @@ impl Booster {
             &mut out_len,
             &mut out_result
         ))?;
-        assert!(!out_result.is_null());
+        if out_result.is_null() {
+            return Err(XGBError::new("predict_margin: null result pointer".to_string()));
+        }
         let data = unsafe { slice::from_raw_parts(out_result, out_len as usize).to_vec() };
         Ok(data)
     }
@@ -560,7 +583,9 @@ impl Booster {
             &mut out_len,
             &mut out_result
         ))?;
-        assert!(!out_result.is_null());
+        if out_result.is_null() {
+            return Err(XGBError::new("predict_leaf: null result pointer".to_string()));
+        }
 
         let data = unsafe { slice::from_raw_parts(out_result, out_len as usize).to_vec() };
         let num_rows = dmat.num_rows();
@@ -589,7 +614,9 @@ impl Booster {
             &mut out_len,
             &mut out_result
         ))?;
-        assert!(!out_result.is_null());
+        if out_result.is_null() {
+            return Err(XGBError::new("predict_contributions: null result pointer".to_string()));
+        }
 
         let data = unsafe { slice::from_raw_parts(out_result, out_len as usize).to_vec() };
         let num_rows = dmat.num_rows();
@@ -619,7 +646,9 @@ impl Booster {
             &mut out_len,
             &mut out_result
         ))?;
-        assert!(!out_result.is_null());
+        if out_result.is_null() {
+            return Err(XGBError::new("predict_interactions: null result pointer".to_string()));
+        }
 
         let data = unsafe { slice::from_raw_parts(out_result, out_len as usize).to_vec() };
         let num_rows = dmat.num_rows();
@@ -685,7 +714,12 @@ impl Booster {
             let out_ptr_slice = unsafe { slice::from_raw_parts(out_dump_array, out_len as usize) };
             let out_vec: Vec<String> = out_ptr_slice
                 .iter()
-                .map(|str_ptr| unsafe { ffi::CStr::from_ptr(*str_ptr).to_str().unwrap().to_owned() })
+                .map(|str_ptr| unsafe {
+                ffi::CStr::from_ptr(*str_ptr)
+                    .to_str()
+                    .map(|s| s.to_owned())
+                    .map_err(|e| XGBError::new(format!("attribute name not valid UTF-8: {}", e)))
+            })
                 .collect();
 
             assert_eq!(out_len as usize, out_vec.len());

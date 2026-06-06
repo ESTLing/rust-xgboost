@@ -42,6 +42,12 @@ impl XGBError {
     }
 }
 
+impl From<std::str::Utf8Error> for XGBError {
+    fn from(e: std::str::Utf8Error) -> Self {
+        XGBError::new(format!("UTF-8 conversion error: {}", e))
+    }
+}
+
 impl Error for XGBError {}
 
 impl Display for XGBError {
