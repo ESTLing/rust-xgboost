@@ -131,15 +131,16 @@ impl DMatrix {
     pub fn from_csr(indptr: &[usize], indices: &[usize], data: &[f32], num_cols: Option<usize>) -> XGBResult<Self> {
         assert_eq!(indices.len(), data.len());
         let mut handle = ptr::null_mut();
+        let indptr: Vec<u64> = indptr.iter().map(|x| *x as u64).collect();
         let indices: Vec<u32> = indices.iter().map(|x| *x as u32).collect();
-        let num_cols = num_cols.unwrap_or(0); // infer from data if 0
-        xgb_call!(xgboost_sys::XGDMatrixCreateFromCSREx(
-            indptr.as_ptr(),
-            indices.as_ptr(),
-            data.as_ptr(),
-            indptr.len(),
-            data.len(),
-            num_cols,
+        let ncol = num_cols.unwrap_or(0) as u64;
+        let config = ffi::CString::new(format!("{{\"ncol\":{}}}", ncol)).unwrap();
+        xgb_call!(xgboost_sys::XGDMatrixCreateFromCSR(
+            indptr.as_ptr() as *const _,
+            indices.as_ptr() as *const _,
+            data.as_ptr() as *const _,
+            ncol as xgboost_sys::bst_ulong,
+            config.as_ptr(),
             &mut handle
         ))?;
         DMatrix::new(handle)
@@ -156,15 +157,16 @@ impl DMatrix {
     pub fn from_csc(indptr: &[usize], indices: &[usize], data: &[f32], num_rows: Option<usize>) -> XGBResult<Self> {
         assert_eq!(indices.len(), data.len());
         let mut handle = ptr::null_mut();
+        let indptr: Vec<u64> = indptr.iter().map(|x| *x as u64).collect();
         let indices: Vec<u32> = indices.iter().map(|x| *x as u32).collect();
-        let num_rows = num_rows.unwrap_or(0); // infer from data if 0
-        xgb_call!(xgboost_sys::XGDMatrixCreateFromCSCEx(
-            indptr.as_ptr(),
-            indices.as_ptr(),
-            data.as_ptr(),
-            indptr.len(),
-            data.len(),
-            num_rows,
+        let nrow = num_rows.unwrap_or(0) as u64;
+        let config = ffi::CString::new(format!("{{\"nrow\":{}}}", nrow)).unwrap();
+        xgb_call!(xgboost_sys::XGDMatrixCreateFromCSC(
+            indptr.as_ptr() as *const _,
+            indices.as_ptr() as *const _,
+            data.as_ptr() as *const _,
+            nrow as xgboost_sys::bst_ulong,
+            config.as_ptr(),
             &mut handle
         ))?;
         DMatrix::new(handle)

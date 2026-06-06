@@ -1,4 +1,4 @@
-use xgb::{DMatrix, Booster};
+use xgboost_rs::{DMatrix, Booster};
 
 fn main() {
     env_logger::init();

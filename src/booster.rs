@@ -271,7 +271,7 @@ impl Booster {
         let name = "default";
         let mut eval = self.eval_set(&[(dmat, name)], 0)?;
         let mut result = HashMap::new();
-        eval.swap_remove(name).unwrap().into_iter().for_each(|(k, v)| {
+        eval.remove(name).unwrap().into_iter().for_each(|(k, v)| {
             result.insert(k.to_owned(), v);
         });
 
@@ -323,7 +323,7 @@ impl Booster {
                     .map(|s| s.to_owned())
                     .map_err(|e| XGBError::new(format!("attribute name not valid UTF-8: {}", e)))
             })
-                .collect();
+                .collect::<Result<Vec<_>, _>>()?;
             Ok(out_vec)
         } else {
             Ok(Vec::new())
@@ -356,7 +356,7 @@ impl Booster {
                     .map(|s| s.to_owned())
                     .map_err(|e| XGBError::new(format!("attribute name not valid UTF-8: {}", e)))
             })
-                .collect();
+                .collect::<Result<Vec<_>, _>>()?;
             Ok(out_vec)
         } else {
             Ok(Vec::new())
@@ -630,7 +630,7 @@ impl Booster {
                     .map(|s| s.to_owned())
                     .map_err(|e| XGBError::new(format!("attribute name not valid UTF-8: {}", e)))
             })
-                .collect();
+                .collect::<Result<Vec<_>, _>>()?;
 
             assert_eq!(out_len as usize, out_vec.len());
             Ok(out_vec)

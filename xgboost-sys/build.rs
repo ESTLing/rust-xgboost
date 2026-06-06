@@ -20,6 +20,20 @@ fn xgboost_version() -> String {
     env::var("XGBOOST_VERSION").unwrap_or_else(|_| "3.2.0".to_string())
 }
 
+/// PyPI host. Set `RUST_PYPI_INDEX` env var to use a mirror
+/// (e.g. `https://pypi.tuna.tsinghua.edu.cn` or `https://mirrors.aliyun.com/pypi`).
+fn pypi_host() -> Option<String> {
+    env::var("RUST_PYPI_INDEX").ok()
+}
+
+/// If using a mirror, rewrite download URLs that still point to `files.pythonhosted.org`.
+fn maybe_rewrite_url(url: &str) -> String {
+    match pypi_host() {
+        Some(ref host) => url.replace("https://files.pythonhosted.org", host),
+        None => url.to_string(),
+    }
+}
+
 fn get_platform_keyword() -> (&'static str, &'static str) {
     let target = env::var("TARGET").unwrap();
     let os = if target.contains("apple-darwin") {
@@ -120,7 +134,7 @@ fn download_wheel(out_dir: &Path, version: &str) -> Result<PathBuf, Box<dyn std:
 
     fs::create_dir_all(&lib_dir)?;
 
-    // Query PyPI JSON API
+    // Query PyPI JSON API (always use official — mirror JSON paths can differ)
     let pypi_url = format!("https://pypi.org/pypi/xgboost/{}/json", version);
     let resp = ureq::get(&pypi_url).call()?;
     let pypi: PyPIResponse = resp.into_json()?;
@@ -136,27 +150,30 @@ fn download_wheel(out_dir: &Path, version: &str) -> Result<PathBuf, Box<dyn std:
             )
         })?;
 
+    // If RUST_PYPI_INDEX is set, rewrite download URL from files.pythonhosted.org to mirror
+    let download_url = maybe_rewrite_url(&wheel.url);
     println!("cargo:warning=Downloading wheel: {}", wheel.filename);
-    let wheel_bytes = download_with_retries(&wheel.url, 3)?;
+    let wheel_bytes = download_with_retries(&download_url, 3)?;
 
     // Extract shared library from wheel (wheel is a ZIP file)
     let cursor = io::Cursor::new(wheel_bytes);
     let mut archive = zip::ZipArchive::new(cursor)?;
 
     let mut found = false;
+    let lib_name_local = lib_name;
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
         let name = file.name().to_string();
-        if name.ends_with(lib_name) {
+        if name.ends_with(lib_name_local) {
             let mut dest = File::create(&lib_path)?;
             io::copy(&mut file, &mut dest)?;
             found = true;
-            println!("cargo:warning=Extracted {} from wheel", lib_name);
+            println!("cargo:warning=Extracted {} from wheel", lib_name_local);
             break;
         }
     }
     if !found {
-        return Err(format!("{} not found in wheel", lib_name).into());
+        return Err(format!("{} not found in wheel", lib_name_local).into());
     }
 
     Ok(lib_dir)
@@ -183,15 +200,14 @@ fn main() {
     let (os, _) = get_platform_keyword();
 
     // Download header + verify SHA256
-    let include_dir =
-        download_header(&out_dir, &version).expect("Failed to download XGBoost headers");
+    let include_dir = download_header(&out_dir, &version).expect("Failed to download XGBoost headers");
 
     // Download wheel + extract shared library
-    let lib_dir =
-        download_wheel(&out_dir, &version).expect("Failed to download XGBoost wheel");
+    let lib_dir = download_wheel(&out_dir, &version).expect("Failed to download XGBoost wheel");
 
     // Generate bindings
-    let bindings = bindgen::Builder::default()
+    let out_path = out_dir.join("bindings.rs");
+    bindgen::Builder::default()
         .header(include_dir.join("c_api.h").to_string_lossy())
         .allowlist_function("XGB.*")
         .allowlist_function("XGD.*")
@@ -201,15 +217,26 @@ fn main() {
         .size_t_is_usize(true)
         .generate_comments(false)
         .generate()
-        .expect("Unable to generate bindings");
-
-    bindings
-        .write_to_file(out_dir.join("bindings.rs"))
+        .expect("Unable to generate bindings")
+        .write_to_file(&out_path)
         .expect("Couldn't write bindings");
 
-    // Set rpath and link
+    // On Windows, inject raw-dylib so the linker generates import thunks
+    // directly from the DLL — no .lib import library needed.
+    #[cfg(target_os = "windows")]
+    {
+        let bindings_src = fs::read_to_string(&out_path).expect("Couldn't read bindings");
+        let bindings_src = bindings_src.replace(
+            "unsafe extern \"C\" {",
+            "#[link(name = \"xgboost\", kind = \"raw-dylib\")]\nunsafe extern \"C\" {",
+        );
+        fs::write(&out_path, &bindings_src).expect("Couldn't write bindings");
+    }
+
+    // Set rpath for runtime library discovery
     set_rpath(&lib_dir, os);
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
+    #[cfg(not(target_os = "windows"))]
     println!("cargo:rustc-link-lib=dylib=xgboost");
 
     // Only rerun when build.rs or XGBOOST_VERSION changes

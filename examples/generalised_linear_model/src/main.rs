@@ -1,65 +1,49 @@
-//! Example of how to fit a generalised linear model in XGBoost.
-
-extern crate xgb;
-extern crate ndarray;
-extern crate env_logger;
-
-use xgb::{parameters, DMatrix, Booster};
+use xgboost_rs::{DMatrix, Booster};
 
 fn main() {
-    // initialise logging, run with e.g. RUST_LOG=xgboost=debug to see more details
     env_logger::init();
 
-    // load train and test matrices from text files (in LibSVM format)
-    println!("Custom objective example...");
-    let dtrain = DMatrix::load(r#"{"uri": "../../xgboost-sys/xgboost/demo/data/agaricus.txt.train?format=libsvm"}"#).unwrap();
-    let dtest = DMatrix::load(r#"{"uri": "../../xgboost-sys/xgboost/demo/data/agaricus.txt.test?format=libsvm"}"#).unwrap();
+    // Synthetic dataset
+    let data = &[
+        1.0, 2.0, 3.0,
+        4.0, 5.0, 6.0,
+        7.0, 8.0, 9.0,
+        1.1, 2.1, 3.1,
+        4.1, 5.1, 6.1,
+        7.1, 8.1, 9.1,
+        1.2, 2.2, 3.2,
+        4.2, 5.2, 6.2,
+    ];
+    let num_rows = 8;
+    let mut dtrain = DMatrix::from_dense(data, num_rows).unwrap();
+    dtrain.set_labels(&[0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]).unwrap();
 
-    // configure objectives, metrics, etc.
-    let learning_params = parameters::learning::LearningTaskParametersBuilder::default()
-        .objective(parameters::learning::Objective::BinaryLogistic)
-        .build().unwrap();
+    let mut dtest = DMatrix::from_dense(data, num_rows).unwrap();
+    dtest.set_labels(&[0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]).unwrap();
 
-    // configure linear model parameters
-    let linear_params = parameters::linear::LinearBoosterParametersBuilder::default()
-            .alpha(0.0001)
-            .lambda(1.0)
-            .build().unwrap();
+    let eval_sets = &[(&dtest, "test"), (&dtrain, "train")];
 
-    // overall configuration for Booster
-    let booster_params = parameters::BoosterParametersBuilder::default()
-        .learning_params(learning_params)
-        .booster_type(parameters::BoosterType::Linear(linear_params))
-        .build().unwrap();
+    // Linear booster (generalised linear model)
+    println!("\nTraining linear booster...");
+    let bst = Booster::train(
+        &[
+            ("booster", "gblinear"),
+            ("alpha", "0.0001"),
+            ("lambda", "1.0"),
+            ("objective", "binary:logistic"),
+        ],
+        &dtrain,
+        4,
+        Some(eval_sets),
+    ).unwrap();
 
-    // Specify datasets to evaluate against during training
-    let evaluation_sets = [(&dtest, "test"), (&dtrain, "train")];
-
-    let training_params = parameters::TrainingParametersBuilder::default()
-        .dtrain(&dtrain)
-        .boost_rounds(4)
-        .booster_params(booster_params)
-        .evaluation_sets(Some(&evaluation_sets))
-        .build().unwrap();
-
-    // Train booster model, and print evaluation metrics
-    println!("\nTraining tree booster...");
-    let bst = Booster::train(&training_params).unwrap();
-
-    // Get predictions probabilities for given matrix (as ndarray::Array1)
     let preds = bst.predict(&dtest).unwrap();
-
-    // Get predicted labels for each test example (0.0 or 1.0 in this case)
     let labels = dtest.get_labels().unwrap();
-
-    // Print error rate
-    let mut num_errors = 0;
-    for (pred, label) in preds.iter().zip(labels) {
-        let pred = if *pred > 0.5 { 1.0 } else { 0.0 };
-        if pred != *label {
-            num_errors += 1;
-        }
-    }
+    let num_errors = preds.iter().zip(labels.iter())
+        .filter(|(p, l)| (*p > 0.5) as u8 as f32 != *l)
+        .count();
     println!("error={} ({}/{} correct)",
-             num_errors as f32 / preds.len() as f32, preds.len() - num_errors, preds.len());
+             num_errors as f32 / preds.len() as f32,
+             preds.len() - num_errors,
+             preds.len());
 }

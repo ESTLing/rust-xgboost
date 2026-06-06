@@ -9,7 +9,7 @@
 //! # Basic usage example
 //!
 //! ```
-//! use xgb::{DMatrix, Booster};
+//! use xgboost_rs::{DMatrix, Booster};
 //!
 //! fn main() {
 //!     let x_train = &[1.0, 1.0, 1.0,

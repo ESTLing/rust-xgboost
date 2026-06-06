@@ -1,12 +1,9 @@
 [package]
-name = "xgb"
+name = "xgboost-rs"
 version.workspace = true
-authors = ["Dave Challis <dave@suicas.net>", "Marco Mengelkoch"]
 license.workspace = true
 repository.workspace = true
-homepage = "https://github.com/marcomq/rust-xgboost"
 description = "Rust bindings for the XGBoost gradient boosting library"
-documentation = "https://docs.rs/xgb"
 readme = "README.md"
 edition.workspace = true
 
@@ -17,7 +14,7 @@ members = [".", "xgboost-sys"]
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/marcomq/rust-xgboost"
+repository = "https://github.com/ESTLing/rust-xgboost"
 
 [dependencies]
 xgboost-sys = { package = "xgboost_lib-sys", path = "xgboost-sys", version = "0.1.0" }
