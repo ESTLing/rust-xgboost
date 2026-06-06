@@ -15,4 +15,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shared library auto-download from PyPI wheels via build.rs
 - Cross-platform support: Linux (x86_64, aarch64), macOS (x86_64, aarch64), Windows (x86_64)
 
-[0.1.0]: https://github.com/marcomq/rust-xgboost/releases/tag/v0.1.0
+[0.1.0]: https://github.com/ESTLing/rust-xgboost/releases/tag/v0.1.0

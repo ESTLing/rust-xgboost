@@ -170,7 +170,19 @@ impl Booster {
         boost_rounds: u32,
         eval_sets: Option<&[(&DMatrix, &str)]>,
     ) -> XGBResult<Self> {
-        let mut bst = Booster::new(params)?;
+        // Pass dtrain to XGBoosterCreate so the booster knows num_feature
+        let dmats = [dtrain.handle];
+        let mut handle = ptr::null_mut();
+        xgb_call!(xgboost_sys::XGBoosterCreate(
+            dmats.as_ptr(),
+            1,
+            &mut handle
+        ))?;
+
+        let mut bst = Booster { handle };
+        for (key, value) in params {
+            bst.set_param(key, value)?;
+        }
 
         for i in 0..boost_rounds as i32 {
             bst.update(dtrain, i)?;
@@ -865,6 +877,17 @@ mod tests {
         assert_eq!(attrs.len(), 3);
     }
 
+    fn create_booster(params: &[(&str, &str)], dtrain: &DMatrix) -> Booster {
+        let dmats = [dtrain.handle];
+        let mut handle = ptr::null_mut();
+        xgb_call!(xgboost_sys::XGBoosterCreate(dmats.as_ptr(), 1, &mut handle)).unwrap();
+        let mut booster = Booster { handle };
+        for (key, value) in params {
+            booster.set_param(key, value).unwrap();
+        }
+        booster
+    }
+
     #[test]
     fn train_and_predict() {
         let data = &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
@@ -878,7 +901,7 @@ mod tests {
             ("objective", "binary:logistic"),
         ];
 
-        let mut booster = Booster::new(params).unwrap();
+        let mut booster = create_booster(params, &dtrain);
         for i in 0..3 {
             booster.update(&dtrain, i).expect("update failed");
         }
