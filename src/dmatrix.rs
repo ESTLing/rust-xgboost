@@ -108,13 +108,32 @@ impl DMatrix {
     /// let num_rows = 3;
     /// let dmat = DMatrix::from_dense(data, num_rows).unwrap();
     /// ```
+    /// Build an `__array_interface__` JSON string, matching Python's numpy protocol.
+    /// XGBoost 3.2+'s C API expects this format for dense/sparse data arrays.
+    /// `shape` is a comma-separated list of dimensions, e.g. `"8,3"` for a 8x3 matrix.
+    fn array_interface(ptr: *const (), shape: &str, typestr: &str) -> ffi::CString {
+        ffi::CString::new(format!(
+            r#"{{"data":[{},false],"shape":[{}],"typestr":"{}","version":3}}"#,
+            ptr as usize, shape, typestr
+        ))
+        .unwrap()
+    }
+
     pub fn from_dense(data: &[f32], num_rows: usize) -> XGBResult<Self> {
+        let num_cols = data.len() / num_rows;
         let mut handle = ptr::null_mut();
-        xgb_call!(xgboost_sys::XGDMatrixCreateFromMat(
-            data.as_ptr(),
-            num_rows as xgboost_sys::bst_ulong,
-            (data.len() / num_rows) as xgboost_sys::bst_ulong,
-            f32::NAN,
+        let typestr = if cfg!(target_endian = "big") { ">f4" } else { "<f4" };
+        let array_json = Self::array_interface(
+            data.as_ptr() as *const (),
+            &format!("{},{}", num_rows, num_cols),
+            typestr,
+        );
+        let config = ffi::CString::new(format!(
+            r#"{{"missing":NaN,"nthread":0,"data_split_mode":0}}"#
+        )).unwrap();
+        xgb_call!(xgboost_sys::XGDMatrixCreateFromDense(
+            array_json.as_ptr(),
+            config.as_ptr(),
             &mut handle
         ))?;
         DMatrix::new(handle)
@@ -122,23 +141,22 @@ impl DMatrix {
 
     /// Create a new `DMatrix` from a sparse
     /// [CSR](https://en.wikipedia.org/wiki/Sparse_matrix#Compressed_sparse_row_(CSR,_CRS_or_Yale_format)) matrix.
-    ///
-    /// Uses standard CSR representation where the column indices for row _i_ are stored in
-    /// `indices[indptr[i]:indptr[i+1]]` and their corresponding values are stored in
-    /// `data[indptr[i]:indptr[i+1]`.
-    ///
-    /// If `num_cols` is set to None, number of columns will be inferred from given data.
     pub fn from_csr(indptr: &[usize], indices: &[usize], data: &[f32], num_cols: Option<usize>) -> XGBResult<Self> {
         assert_eq!(indices.len(), data.len());
         let mut handle = ptr::null_mut();
         let indptr: Vec<u64> = indptr.iter().map(|x| *x as u64).collect();
         let indices: Vec<u32> = indices.iter().map(|x| *x as u32).collect();
         let ncol = num_cols.unwrap_or(0) as u64;
-        let config = ffi::CString::new(format!("{{\"ncol\":{}}}", ncol)).unwrap();
+        let indptr_json = Self::array_interface(indptr.as_ptr() as *const (), &indptr.len().to_string(), "<u8");
+        let indices_json = Self::array_interface(indices.as_ptr() as *const (), &indices.len().to_string(), "<u4");
+        let data_json = Self::array_interface(data.as_ptr() as *const (), &data.len().to_string(), "<f4");
+        let config = ffi::CString::new(format!(
+            r#"{{"missing":NaN,"nthread":0,"data_split_mode":0}}"#
+        )).unwrap();
         xgb_call!(xgboost_sys::XGDMatrixCreateFromCSR(
-            indptr.as_ptr() as *const _,
-            indices.as_ptr() as *const _,
-            data.as_ptr() as *const _,
+            indptr_json.as_ptr(),
+            indices_json.as_ptr(),
+            data_json.as_ptr(),
             ncol as xgboost_sys::bst_ulong,
             config.as_ptr(),
             &mut handle
@@ -148,23 +166,22 @@ impl DMatrix {
 
     /// Create a new `DMatrix` from a sparse
     /// [CSC](https://en.wikipedia.org/wiki/Sparse_matrix#Compressed_sparse_column_(CSC_or_CCS))) matrix.
-    ///
-    /// Uses standard CSC representation where the row indices for column _i_ are stored in
-    /// `indices[indptr[i]:indptr[i+1]]` and their corresponding values are stored in
-    /// `data[indptr[i]:indptr[i+1]`.
-    ///
-    /// If `num_rows` is set to None, number of rows will be inferred from given data.
     pub fn from_csc(indptr: &[usize], indices: &[usize], data: &[f32], num_rows: Option<usize>) -> XGBResult<Self> {
         assert_eq!(indices.len(), data.len());
         let mut handle = ptr::null_mut();
         let indptr: Vec<u64> = indptr.iter().map(|x| *x as u64).collect();
         let indices: Vec<u32> = indices.iter().map(|x| *x as u32).collect();
         let nrow = num_rows.unwrap_or(0) as u64;
-        let config = ffi::CString::new(format!("{{\"nrow\":{}}}", nrow)).unwrap();
+        let indptr_json = Self::array_interface(indptr.as_ptr() as *const (), &indptr.len().to_string(), "<u8");
+        let indices_json = Self::array_interface(indices.as_ptr() as *const (), &indices.len().to_string(), "<u4");
+        let data_json = Self::array_interface(data.as_ptr() as *const (), &data.len().to_string(), "<f4");
+        let config = ffi::CString::new(format!(
+            r#"{{"missing":NaN,"nthread":0,"data_split_mode":0}}"#
+        )).unwrap();
         xgb_call!(xgboost_sys::XGDMatrixCreateFromCSC(
-            indptr.as_ptr() as *const _,
-            indices.as_ptr() as *const _,
-            data.as_ptr() as *const _,
+            indptr_json.as_ptr(),
+            indices_json.as_ptr(),
+            data_json.as_ptr(),
             nrow as xgboost_sys::bst_ulong,
             config.as_ptr(),
             &mut handle

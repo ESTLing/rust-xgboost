@@ -1,5 +1,3 @@
-
-
 # rust-xgboost
 
 Rust bindings for the [XGBoost](https://xgboost.ai) gradient boosting library.
@@ -66,8 +64,6 @@ Set `RUST_PYPI_INDEX` to a mirror URL for faster downloads (e.g. in China):
 ```bash
 # Tsinghua mirror
 export RUST_PYPI_INDEX=https://pypi.tuna.tsinghua.edu.cn
-# Aliyun mirror
-export RUST_PYPI_INDEX=https://mirrors.aliyun.com/pypi
 ```
 
 ## Supported Platforms

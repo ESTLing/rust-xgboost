@@ -7,14 +7,18 @@ fn main() {
         5.2, 6.2,
     ];
     let num_rows = 8;
-    let mut dtrain = DMatrix::from_dense(data, num_rows).unwrap();
-    dtrain.set_labels(&[0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]).unwrap();
+    let mut dtrain = DMatrix::from_dense(data, num_rows)
+        .expect("from_dense dtrain");
+    dtrain.set_labels(&[0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0])
+        .expect("set_labels dtrain");
     println!("Train matrix: {}x{}", dtrain.num_rows(), dtrain.num_cols());
 
-    let mut dtest = DMatrix::from_dense(data, num_rows).unwrap();
-    dtest.set_labels(&[0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]).unwrap();
+    let mut dtest = DMatrix::from_dense(data, num_rows)
+        .expect("from_dense dtest");
+    dtest.set_labels(&[0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0])
+        .expect("set_labels dtest");
 
-    // Train using flat string key-value parameters (like Python's xgb.train)
+    // Train using flat string key-value parameters
     let eval_sets = &[(&dtest, "test"), (&dtrain, "train")];
     println!("\nTraining tree booster...");
     let booster = Booster::train(
@@ -23,24 +27,24 @@ fn main() {
         10,
         Some(eval_sets),
     )
-    .unwrap();
+    .expect("train");
 
     // Predict
-    let preds = booster.predict(&dtest).unwrap();
+    let preds = booster.predict(&dtest).expect("predict");
     println!("Predictions: {:?}", &preds[..4]);
 
     // Save and load
     println!("\nSaving and loading Booster model...");
-    booster.save("xgb.json").unwrap();
-    let booster2 = Booster::load("xgb.json").unwrap();
-    let preds2 = booster2.predict(&dtest).unwrap();
+    booster.save("xgb.json").expect("save booster");
+    let booster2 = Booster::load("xgb.json").expect("load booster");
+    let preds2 = booster2.predict(&dtest).expect("predict after load");
     assert_eq!(preds, preds2);
 
     // Save and load DMatrix
     println!("\nSaving and loading matrix data...");
-    dtest.save("test.dmat").unwrap();
-    let dtest2 = DMatrix::load_binary("test.dmat").unwrap();
-    assert_eq!(booster.predict(&dtest2).unwrap(), preds);
+    dtest.save("test.dmat").expect("save dmatrix");
+    let dtest2 = DMatrix::load_binary("test.dmat").expect("load_binary dtest");
+    assert_eq!(booster.predict(&dtest2).expect("predict on loaded dmat"), preds);
 
     // Error handling
     println!("\nError message example...");
@@ -54,14 +58,15 @@ fn main() {
     let indptr = &[0, 2, 3, 4];
     let indices = &[0, 2, 2, 1];
     let sparse_data = &[1.0, 2.0, 3.0, 4.0];
-    let mut dmat = DMatrix::from_csr(indptr, indices, sparse_data, Some(3)).unwrap();
-    dmat.set_labels(&[0.0, 1.0, 0.0]).unwrap();
+    let mut dmat = DMatrix::from_csr(indptr, indices, sparse_data, Some(3))
+        .expect("from_csr");
+    dmat.set_labels(&[0.0, 1.0, 0.0]).expect("set_labels csr");
     let bst = Booster::train(
         &[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")],
         &dmat,
         2,
         None,
     )
-    .unwrap();
-    println!("CSR predictions: {:?}", bst.predict(&dmat).unwrap());
+    .expect("train csr");
+    println!("CSR predictions: {:?}", bst.predict(&dmat).expect("predict csr"));
 }

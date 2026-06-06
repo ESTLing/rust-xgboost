@@ -62,15 +62,3 @@ xgboost-sys/build.rs   — PyPI download, header verification, bindgen, raw-dyli
 xgboost-sys/src/lib.rs — include! bindings.rs
 examples/              — basic, generalised_linear_model, multiclass_classification
 ```
-
-## Current branch: refactor/0.1.0-overhaul
-
-Phase 1-4 refactoring from old `xgb 3.0.5` to `xgboost-rs 0.1.0`:
-- Removed all parameter structs/enums/builders (was `src/parameters/`)
-- Replaced builder API with flat `&[(&str, &str)]` params
-- Rewrote build.rs for PyPI-based download (removed submodule, prebuilt libs, cmake)
-- Added raw-dylib for Windows (removed .lib dependency)
-- Fixed unsafe issues (Drop unwrap, release asserts, UTF-8 panics)
-- Reset version to 0.1.0 with workspace structure
-- Updated CI (consolidated workflows, added clippy/fmt/doc)
-- Crate renamed from `xgb` to `xgboost-rs`
