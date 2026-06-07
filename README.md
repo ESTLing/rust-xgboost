@@ -28,11 +28,11 @@ fn main() {
                     0.0, 0.0, 0.0,
                     1.0, 1.0, 1.0];
     let mut dtrain = DMatrix::from_dense(x_train, 5).unwrap();
-    dtrain.set_labels(&[1.0, 1.0, 1.0, 0.0, 1.0]).unwrap();
+    dtrain.set_label(&[1.0, 1.0, 1.0, 0.0, 1.0]).unwrap();
 
     let x_test = &[0.7, 0.9, 0.6];
     let mut dtest = DMatrix::from_dense(x_test, 1).unwrap();
-    dtest.set_labels(&[1.0]).unwrap();
+    dtest.set_label(&[1.0]).unwrap();
 
     let eval_sets = &[(&dtrain, "train"), (&dtest, "test")];
 

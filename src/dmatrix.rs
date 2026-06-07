@@ -1,13 +1,29 @@
 use libc::{c_float, c_uint};
 use std::{ffi, path::Path, ptr, slice};
 
-use super::{XGBError, XGBResult};
+use super::{XGBError, XGBResult, NAN_SENTINEL};
 
-static KEY_GROUP_PTR: &str = "group_ptr";
-static KEY_GROUP: &str = "group";
-static KEY_LABEL: &str = "label";
-static KEY_WEIGHT: &str = "weight";
-static KEY_BASE_MARGIN: &str = "base_margin";
+// XGBoost-defined field names for DMatrix metadata (see C API XGDMatrixSetFloatInfo / SetUIntInfo).
+//
+// | type   | field              | meaning                            |
+// |--------|--------------------|------------------------------------|
+// | float  | label              | ground truth labels                |
+// | float  | weight             | instance weights                   |
+// | float  | base_margin        | base prediction before boosting    |
+// | float  | label_lower_bound  | lower bound (censored regression)  |
+// | float  | label_upper_bound  | upper bound (censored regression)  |
+// | float  | feature_weights    | per-feature column weights         |
+// | uint   | group_ptr          | cumulative group offsets (ranking) |
+// | uint   | group              | group sizes (ranking)              |
+// | uint   | qid                | query ID (ranking)                 |
+pub static KEY_GROUP_PTR: &str = "group_ptr";
+pub static KEY_GROUP: &str = "group";
+pub static KEY_LABEL: &str = "label";
+pub static KEY_WEIGHT: &str = "weight";
+pub static KEY_BASE_MARGIN: &str = "base_margin";
+pub static KEY_LABEL_LOWER_BOUND: &str = "label_lower_bound";
+pub static KEY_LABEL_UPPER_BOUND: &str = "label_upper_bound";
+pub static KEY_QID: &str = "qid";
 
 /// Data matrix used throughout XGBoost for training/predicting [`Booster`](struct.Booster.html) models.
 ///
@@ -43,7 +59,7 @@ static KEY_BASE_MARGIN: &str = "base_margin";
 /// assert_eq!(dmat.shape(), (3, 4));
 ///
 /// // set true labels for each row
-/// dmat.set_labels(&[1.0, 0.0, 1.0]);
+/// dmat.set_label(&[1.0, 0.0, 1.0]);
 /// ```
 ///
 /// ## Create from sparse CSR matrix
@@ -92,6 +108,18 @@ impl DMatrix {
         })
     }
 
+    /// Return the native-endian typestr for the given float width (4 = f32, 8 = f64).
+    fn ftypestr(width: u8) -> String {
+        let prefix = if cfg!(target_endian = "big") { ">" } else { "<" };
+        format!("{}f{}", prefix, width)
+    }
+
+    /// Return the native-endian typestr for the given unsigned integer width.
+    fn utypestr(width: u8) -> String {
+        let prefix = if cfg!(target_endian = "big") { ">" } else { "<" };
+        format!("{}u{}", prefix, width)
+    }
+
     /// Create a new `DMatrix` from dense array in row-major order.
     ///
     /// E.g. the matrix
@@ -108,29 +136,16 @@ impl DMatrix {
     /// let num_rows = 3;
     /// let dmat = DMatrix::from_dense(data, num_rows).unwrap();
     /// ```
-    /// Build an `__array_interface__` JSON string, matching Python's numpy protocol.
-    /// XGBoost 3.2+'s C API expects this format for dense/sparse data arrays.
-    /// `shape` is a comma-separated list of dimensions, e.g. `"8,3"` for a 8x3 matrix.
-    fn array_interface(ptr: *const (), shape: &str, typestr: &str) -> ffi::CString {
-        ffi::CString::new(format!(
-            r#"{{"data":[{},false],"shape":[{}],"typestr":"{}","version":3}}"#,
-            ptr as usize, shape, typestr
-        ))
-        .unwrap()
-    }
-
     pub fn from_dense(data: &[f32], num_rows: usize) -> XGBResult<Self> {
         let num_cols = data.len() / num_rows;
         let mut handle = ptr::null_mut();
-        let typestr = if cfg!(target_endian = "big") { ">f4" } else { "<f4" };
-        let array_json = Self::array_interface(
-            data.as_ptr() as *const (),
-            &format!("{},{}", num_rows, num_cols),
-            typestr,
+        let array_json = json_str!(
+            "data" => serde_json::json!([data.as_ptr() as usize, false]),
+            "shape" => [num_rows, num_cols],
+            "typestr" => Self::ftypestr(4),
+            "version" => 3,
         );
-        let config = ffi::CString::new(format!(
-            r#"{{"missing":NaN,"nthread":0,"data_split_mode":0}}"#
-        )).unwrap();
+        let config = json_str!("missing" => NAN_SENTINEL, "nthread" => 0, "data_split_mode" => 0);
         xgb_call!(xgboost_sys::XGDMatrixCreateFromDense(
             array_json.as_ptr(),
             config.as_ptr(),
@@ -147,12 +162,10 @@ impl DMatrix {
         let indptr: Vec<u64> = indptr.iter().map(|x| *x as u64).collect();
         let indices: Vec<u32> = indices.iter().map(|x| *x as u32).collect();
         let ncol = num_cols.unwrap_or(0) as u64;
-        let indptr_json = Self::array_interface(indptr.as_ptr() as *const (), &indptr.len().to_string(), "<u8");
-        let indices_json = Self::array_interface(indices.as_ptr() as *const (), &indices.len().to_string(), "<u4");
-        let data_json = Self::array_interface(data.as_ptr() as *const (), &data.len().to_string(), "<f4");
-        let config = ffi::CString::new(format!(
-            r#"{{"missing":NaN,"nthread":0,"data_split_mode":0}}"#
-        )).unwrap();
+        let indptr_json = json_str!("data" => serde_json::json!([indptr.as_ptr() as usize, false]), "shape" => [indptr.len()], "typestr" => Self::utypestr(8), "version" => 3);
+        let indices_json = json_str!("data" => serde_json::json!([indices.as_ptr() as usize, false]), "shape" => [indices.len()], "typestr" => Self::utypestr(4), "version" => 3);
+        let data_json = json_str!("data" => serde_json::json!([data.as_ptr() as usize, false]), "shape" => [data.len()], "typestr" => Self::ftypestr(4), "version" => 3);
+        let config = json_str!("missing" => NAN_SENTINEL, "nthread" => 0, "data_split_mode" => 0);
         xgb_call!(xgboost_sys::XGDMatrixCreateFromCSR(
             indptr_json.as_ptr(),
             indices_json.as_ptr(),
@@ -172,12 +185,10 @@ impl DMatrix {
         let indptr: Vec<u64> = indptr.iter().map(|x| *x as u64).collect();
         let indices: Vec<u32> = indices.iter().map(|x| *x as u32).collect();
         let nrow = num_rows.unwrap_or(0) as u64;
-        let indptr_json = Self::array_interface(indptr.as_ptr() as *const (), &indptr.len().to_string(), "<u8");
-        let indices_json = Self::array_interface(indices.as_ptr() as *const (), &indices.len().to_string(), "<u4");
-        let data_json = Self::array_interface(data.as_ptr() as *const (), &data.len().to_string(), "<f4");
-        let config = ffi::CString::new(format!(
-            r#"{{"missing":NaN,"nthread":0,"data_split_mode":0}}"#
-        )).unwrap();
+        let indptr_json = json_str!("data" => serde_json::json!([indptr.as_ptr() as usize, false]), "shape" => [indptr.len()], "typestr" => Self::utypestr(8), "version" => 3);
+        let indices_json = json_str!("data" => serde_json::json!([indices.as_ptr() as usize, false]), "shape" => [indices.len()], "typestr" => Self::utypestr(4), "version" => 3);
+        let data_json = json_str!("data" => serde_json::json!([data.as_ptr() as usize, false]), "shape" => [data.len()], "typestr" => Self::ftypestr(4), "version" => 3);
+        let config = json_str!("missing" => NAN_SENTINEL, "nthread" => 0, "data_split_mode" => 0);
         xgb_call!(xgboost_sys::XGDMatrixCreateFromCSC(
             indptr_json.as_ptr(),
             indices_json.as_ptr(),
@@ -214,24 +225,8 @@ impl DMatrix {
     pub fn load<P: AsRef<Path>>(path: P) -> XGBResult<Self> {
         debug!("Loading DMatrix from: {}", path.as_ref().display());
         let mut handle = ptr::null_mut();
-        let config = serde_json::json!({
-            "uri": path.as_ref().to_string_lossy(),
-            "silent": 1,
-        });
-        let config_cstr = ffi::CString::new(config.to_string()).unwrap();
-        xgb_call!(xgboost_sys::XGDMatrixCreateFromURI(config_cstr.as_ptr(), &mut handle))?;
-        DMatrix::new(handle)
-    }
-
-    pub fn load_binary<P: AsRef<Path>>(path: P) -> XGBResult<Self> {
-        debug!("Loading DMatrix from: {}", path.as_ref().display());
-        let mut handle = ptr::null_mut();
-        let config = serde_json::json!({
-            "uri": path.as_ref().to_string_lossy(),
-            "silent": 1,
-        });
-        let config_cstr = ffi::CString::new(config.to_string()).unwrap();
-        xgb_call!(xgboost_sys::XGDMatrixCreateFromURI(config_cstr.as_ptr(), &mut handle))?;
+        let config = json_str!("uri" => path.as_ref().to_string_lossy(), "silent" => 1);
+        xgb_call!(xgboost_sys::XGDMatrixCreateFromURI(config.as_ptr(), &mut handle))?;
         DMatrix::new(handle)
     }
 
@@ -262,72 +257,45 @@ impl DMatrix {
         (self.num_rows(), self.num_cols())
     }
 
-    /// Get a new DMatrix as a containing only given indices.
-    pub fn slice(&self, indices: &[usize]) -> XGBResult<DMatrix> {
-        debug!("Slicing {} rows from DMatrix", indices.len());
+    /// Get the number of non-missing values in the DMatrix.
+    ///
+    /// This is the count of elements that are not marked as missing in the data.
+    pub fn num_nonmissing(&self) -> XGBResult<usize> {
+        let mut out = 0u64;
+        xgb_call!(xgboost_sys::XGDMatrixNumNonMissing(self.handle, &mut out))?;
+        Ok(out as usize)
+    }
+
+    /// Get the data split mode (row-wise vs column-wise) for distributed computing.
+    pub fn data_split_mode(&self) -> XGBResult<u64> {
+        let mut out = 0u64;
+        xgb_call!(xgboost_sys::XGDMatrixDataSplitMode(self.handle, &mut out))?;
+        Ok(out)
+    }
+
+    /// Get a new DMatrix containing only the given row indices.
+    ///
+    /// If `allow_groups` is true, permits slicing a matrix that has group information set
+    /// (used in learning-to-rank tasks).
+    pub fn slice(&self, indices: &[usize], allow_groups: bool) -> XGBResult<DMatrix> {
+        debug!("Slicing {} rows from DMatrix (allow_groups={})", indices.len(), allow_groups);
         let mut out_handle = ptr::null_mut();
         let indices: Vec<i32> = indices.iter().map(|x| *x as i32).collect();
-        xgb_call!(xgboost_sys::XGDMatrixSliceDMatrix(
+        xgb_call!(xgboost_sys::XGDMatrixSliceDMatrixEx(
             self.handle,
             indices.as_ptr(),
             indices.len() as xgboost_sys::bst_ulong,
-            &mut out_handle
+            &mut out_handle,
+            allow_groups as i32
         ))?;
         DMatrix::new(out_handle)
     }
 
-    /// Get ground truth labels for each row of this matrix.
-    pub fn get_labels(&self) -> XGBResult<&[f32]> {
-        self.get_float_info(KEY_LABEL)
-    }
-
-    /// Set ground truth labels for each row of this matrix.
-    pub fn set_labels(&mut self, array: &[f32]) -> XGBResult<()> {
-        self.set_float_info(KEY_LABEL, array)
-    }
-
-    /// Get weights of each instance.
-    pub fn get_weights(&self) -> XGBResult<&[f32]> {
-        self.get_float_info(KEY_WEIGHT)
-    }
-
-    /// Set weights of each instance.
-    pub fn set_weights(&mut self, array: &[f32]) -> XGBResult<()> {
-        self.set_float_info(KEY_WEIGHT, array)
-    }
-
-    /// Get base margin.
-    pub fn get_base_margin(&self) -> XGBResult<&[f32]> {
-        self.get_float_info(KEY_BASE_MARGIN)
-    }
-
-    /// Set base margin.
+    /// Get float metadata by field name.
     ///
-    /// If specified, xgboost will start from this margin, can be used to specify initial prediction to boost from.
-    pub fn set_base_margin(&mut self, array: &[f32]) -> XGBResult<()> {
-        self.set_float_info(KEY_BASE_MARGIN, array)
-    }
-
-    /// Set the index for the beginning and end of a group.
-    ///
-    /// Needed when the learning task is ranking.
-    ///
-    /// See the XGBoost documentation for more information.
-    pub fn set_group(&mut self, group: &[u32]) -> XGBResult<()> {
-        // same as xgb_call!(xgboost_sys::XGDMatrixSetGroup(self.handle, group.as_ptr(), group.len() as u64))
-        self.set_uint_info(KEY_GROUP, group)
-    }
-
-    /// Get the index for the beginning and end of a group.
-    ///
-    /// Needed when the learning task is ranking.
-    ///
-    /// See the XGBoost documentation for more information.
-    pub fn get_group(&self) -> XGBResult<&[u32]> {
-        self.get_uint_info(KEY_GROUP_PTR)
-    }
-
-    fn get_float_info(&self, field: &str) -> XGBResult<&[f32]> {
+    /// Known fields: `"label"`, `"weight"`, `"base_margin"`,
+    /// `"label_lower_bound"`, `"label_upper_bound"`.
+    pub fn get_float_info(&self, field: &str) -> XGBResult<&[f32]> {
         let field = ffi::CString::new(field).unwrap();
         let mut out_len = 0;
         let mut out_dptr = ptr::null();
@@ -345,7 +313,8 @@ impl DMatrix {
         }
     }
 
-    fn set_float_info(&mut self, field: &str, array: &[f32]) -> XGBResult<()> {
+    /// Set float metadata by field name.
+    pub fn set_float_info(&mut self, field: &str, array: &[f32]) -> XGBResult<()> {
         let field = ffi::CString::new(field).unwrap();
         xgb_call!(xgboost_sys::XGDMatrixSetFloatInfo(
             self.handle,
@@ -355,7 +324,30 @@ impl DMatrix {
         ))
     }
 
-    fn get_uint_info(&self, field: &str) -> XGBResult<&[u32]> {
+    /// Set ground truth labels for each row.
+    pub fn set_label(&mut self, labels: &[f32]) -> XGBResult<()> {
+        self.set_float_info(KEY_LABEL, labels)
+    }
+
+    /// Get ground truth labels.
+    pub fn get_label(&self) -> XGBResult<&[f32]> {
+        self.get_float_info(KEY_LABEL)
+    }
+
+    /// Set instance weights.
+    pub fn set_weight(&mut self, weights: &[f32]) -> XGBResult<()> {
+        self.set_float_info(KEY_WEIGHT, weights)
+    }
+
+    /// Get instance weights.
+    pub fn get_weight(&self) -> XGBResult<&[f32]> {
+        self.get_float_info(KEY_WEIGHT)
+    }
+
+    /// Get unsigned integer metadata by field name.
+    ///
+    /// Known fields: `"group"`, `"group_ptr"`, `"qid"`.
+    pub fn get_uint_info(&self, field: &str) -> XGBResult<&[u32]> {
         let field = ffi::CString::new(field).unwrap();
         let mut out_len = 0;
         let mut out_dptr = ptr::null();
@@ -373,13 +365,59 @@ impl DMatrix {
         }
     }
 
-    fn set_uint_info(&mut self, field: &str, array: &[u32]) -> XGBResult<()> {
+    /// Set unsigned integer metadata by field name.
+    pub fn set_uint_info(&mut self, field: &str, array: &[u32]) -> XGBResult<()> {
         let field = ffi::CString::new(field).unwrap();
         xgb_call!(xgboost_sys::XGDMatrixSetUIntInfo(
             self.handle,
             field.as_ptr(),
             array.as_ptr(),
             array.len() as u64
+        ))
+    }
+
+    /// Get string array metadata by field name.
+    ///
+    /// Known fields: `"feature_name"`, `"feature_type"`.
+    /// Returns `None` if no data has been set.
+    pub fn get_str_feature_info(&self, field: &str) -> XGBResult<Option<Vec<String>>> {
+        let field = ffi::CString::new(field).unwrap();
+        let mut out_len = 0u64;
+        let mut out_features: *mut *const std::os::raw::c_char = ptr::null_mut();
+        xgb_call!(xgboost_sys::XGDMatrixGetStrFeatureInfo(
+            self.handle,
+            field.as_ptr(),
+            &mut out_len,
+            &mut out_features
+        ))?;
+        if out_len == 0 || out_features.is_null() {
+            return Ok(None);
+        }
+        let len = out_len as usize;
+        let mut result = Vec::with_capacity(len);
+        for i in 0..len {
+            let c_str = unsafe { ffi::CStr::from_ptr(*out_features.add(i)) };
+            result.push(c_str.to_string_lossy().into_owned());
+        }
+        Ok(Some(result))
+    }
+
+    /// Set string array metadata by field name.
+    ///
+    /// Pass an empty slice to reset.
+    pub fn set_str_feature_info(&mut self, field: &str, features: &[String]) -> XGBResult<()> {
+        let field = ffi::CString::new(field).unwrap();
+        let c_strings: Vec<ffi::CString> = features
+            .iter()
+            .map(|s| ffi::CString::new(s.as_str()).unwrap())
+            .collect();
+        let ptrs: Vec<*const std::os::raw::c_char> =
+            c_strings.iter().map(|cs| cs.as_ptr()).collect();
+        xgb_call!(xgboost_sys::XGDMatrixSetStrFeatureInfo(
+            self.handle,
+            field.as_ptr(),
+            ptrs.as_ptr() as *mut *const std::os::raw::c_char,
+            features.len() as u64
         ))
     }
 }
@@ -422,7 +460,7 @@ mod tests {
         let out_path = tmp_dir.path().join("dmat.bin");
         dmat.save(&out_path).unwrap();
 
-        let dmat2 = DMatrix::load_binary(out_path).unwrap();
+        let dmat2 = DMatrix::load(out_path).unwrap();
 
         assert_eq!(dmat.num_rows(), dmat2.num_rows());
         assert_eq!(dmat.num_cols(), dmat2.num_cols());
@@ -432,47 +470,47 @@ mod tests {
     #[test]
     fn get_set_labels() {
         let mut dmat = read_train_matrix().unwrap();
-        let labels = dmat.get_labels();
+        let labels = dmat.get_label();
         assert!(labels.is_ok());
         let mut labels = labels.unwrap().to_vec();
         assert_eq!(labels.len(), 6513);
 
         labels[0] = 0.1;
-        assert_ne!(dmat.get_labels().unwrap(), labels);
-        assert!(dmat.set_labels(&labels).is_ok());
-        assert_eq!(dmat.get_labels().unwrap(), labels);
+        assert_ne!(dmat.get_label().unwrap(), labels);
+        assert!(dmat.set_label(&labels).is_ok());
+        assert_eq!(dmat.get_label().unwrap(), labels);
     }
 
     #[test]
     fn get_set_weights() {
         let mut dmat = read_train_matrix().unwrap();
-        assert!(dmat.get_weights().unwrap().is_empty());
+        assert!(dmat.get_weight().unwrap().is_empty());
 
         let weight = [1.0, 10.0, 44.9555];
-        assert!(dmat.set_weights(&weight).is_ok());
-        assert_eq!(dmat.get_weights().unwrap(), weight);
+        assert!(dmat.set_weight(&weight).is_ok());
+        assert_eq!(dmat.get_weight().unwrap(), weight);
     }
 
     #[test]
     fn get_set_base_margin() {
         let mut dmat = read_train_matrix().unwrap();
-        let base_margin = dmat.get_base_margin();
+        let base_margin = dmat.get_float_info(KEY_BASE_MARGIN);
         assert!(base_margin.is_ok());
         assert!(base_margin.unwrap().is_empty());
 
         let base_margin = vec![0.00001; dmat.num_rows()];
-        assert!(dmat.set_base_margin(&base_margin).is_ok());
-        assert_eq!(dmat.get_base_margin().unwrap(), base_margin);
+        assert!(dmat.set_float_info(KEY_BASE_MARGIN, &base_margin).is_ok());
+        assert_eq!(dmat.get_float_info(KEY_BASE_MARGIN).unwrap(), base_margin);
     }
 
     #[test]
     fn get_set_group() {
         let mut dmat = read_train_matrix().unwrap();
-        assert!(dmat.get_group().unwrap().is_empty());
+        assert!(dmat.get_uint_info(KEY_GROUP_PTR).unwrap().is_empty());
 
         let group = [1];
-        assert!(dmat.set_group(&group).is_ok());
-        assert_eq!(dmat.get_group().unwrap(), &[0, 1]);
+        assert!(dmat.set_uint_info(KEY_GROUP, &group).is_ok());
+        assert_eq!(dmat.get_uint_info(KEY_GROUP_PTR).unwrap(), &[0, 1]);
     }
 
     #[test]
@@ -530,12 +568,11 @@ mod tests {
         let dmat = DMatrix::from_dense(&data, num_rows).unwrap();
         assert_eq!(dmat.shape(), (4, 2));
 
-        assert_eq!(dmat.slice(&[]).unwrap().shape(), (0, 2));
-        assert_eq!(dmat.slice(&[1]).unwrap().shape(), (1, 2));
-        assert_eq!(dmat.slice(&[0, 1]).unwrap().shape(), (2, 2));
-        assert_eq!(dmat.slice(&[3, 2, 1]).unwrap().shape(), (3, 2));
-        // slicing out of bounds is not safe and can cause a segfault
-        // assert_eq!(dmat.slice(&[10, 11, 12]).unwrap().shape(), (3, 2));
+        assert_eq!(dmat.slice(&[], false).unwrap().shape(), (0, 2));
+        assert_eq!(dmat.slice(&[1], false).unwrap().shape(), (1, 2));
+        assert_eq!(dmat.slice(&[0, 1], false).unwrap().shape(), (2, 2));
+        assert_eq!(dmat.slice(&[3, 2, 1], false).unwrap().shape(), (3, 2));
+        // assert_eq!(dmat.slice(&[10, 11, 12], false).unwrap().shape(), (3, 2));
     }
 
     #[test]
@@ -546,10 +583,10 @@ mod tests {
         let dmat = DMatrix::from_dense(&data, num_rows).unwrap();
         assert_eq!(dmat.shape(), (4, 3));
 
-        assert_eq!(dmat.slice(&[0, 1, 2, 3]).unwrap().shape(), (4, 3));
-        assert_eq!(dmat.slice(&[0, 1]).unwrap().shape(), (2, 3));
-        assert_eq!(dmat.slice(&[1, 0]).unwrap().shape(), (2, 3));
-        assert_eq!(dmat.slice(&[0, 1, 2]).unwrap().shape(), (3, 3));
-        assert_eq!(dmat.slice(&[3, 2, 1]).unwrap().shape(), (3, 3));
+        assert_eq!(dmat.slice(&[0, 1, 2, 3], false).unwrap().shape(), (4, 3));
+        assert_eq!(dmat.slice(&[0, 1], false).unwrap().shape(), (2, 3));
+        assert_eq!(dmat.slice(&[1, 0], false).unwrap().shape(), (2, 3));
+        assert_eq!(dmat.slice(&[0, 1, 2], false).unwrap().shape(), (3, 3));
+        assert_eq!(dmat.slice(&[3, 2, 1], false).unwrap().shape(), (3, 3));
     }
 }

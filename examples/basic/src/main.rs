@@ -1,4 +1,4 @@
-use xgboost_rs::{Booster, DMatrix};
+use xgboost_rs::{Booster, DMatrix, KEY_LABEL};
 
 fn main() {
     // Create a simple synthetic dataset: 8 rows, 3 features
@@ -9,13 +9,13 @@ fn main() {
     let num_rows = 8;
     let mut dtrain = DMatrix::from_dense(data, num_rows).expect("from_dense dtrain");
     dtrain
-        .set_labels(&[0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0])
+        .set_label(&[0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0])
         .expect("set_labels dtrain");
     println!("Train matrix: {}x{}", dtrain.num_rows(), dtrain.num_cols());
 
     let mut dtest = DMatrix::from_dense(data, num_rows).expect("from_dense dtest");
     dtest
-        .set_labels(&[0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0])
+        .set_label(&[0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0])
         .expect("set_labels dtest");
 
     // Train using flat string key-value parameters
@@ -43,7 +43,7 @@ fn main() {
     // Save and load DMatrix
     println!("\nSaving and loading matrix data...");
     dtest.save("test.dmat").expect("save dmatrix");
-    let dtest2 = DMatrix::load_binary("test.dmat").expect("load_binary dtest");
+    let dtest2 = DMatrix::load("test.dmat").expect("load dtest");
     assert_eq!(booster.predict(&dtest2).expect("predict on loaded dmat"), preds);
 
     // Error handling
@@ -59,7 +59,8 @@ fn main() {
     let indices = &[0, 2, 2, 1];
     let sparse_data = &[1.0, 2.0, 3.0, 4.0];
     let mut dmat = DMatrix::from_csr(indptr, indices, sparse_data, Some(3)).expect("from_csr");
-    dmat.set_labels(&[0.0, 1.0, 0.0]).expect("set_labels csr");
+    dmat.set_label(&[0.0, 1.0, 0.0])
+        .expect("set_labels csr");
     let bst = Booster::train(
         &[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")],
         &dmat,

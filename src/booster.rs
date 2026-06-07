@@ -803,6 +803,7 @@ impl fmt::Display for FeatureType {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dmatrix::KEY_LABEL;
 
     #[test]
     fn set_booster_param() {
@@ -893,7 +894,7 @@ mod tests {
         let data = &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         let num_rows = 4;
         let mut dtrain = DMatrix::from_dense(data, num_rows).unwrap();
-        dtrain.set_labels(&[0.0, 1.0, 0.0, 1.0]).unwrap();
+        dtrain.set_label(&[0.0, 1.0, 0.0, 1.0]).unwrap();
 
         let params = &[
             ("max_depth", "2"),
@@ -915,9 +916,9 @@ mod tests {
         let data = &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         let num_rows = 4;
         let mut dtrain = DMatrix::from_dense(data, num_rows).unwrap();
-        dtrain.set_labels(&[0.0, 1.0, 0.0, 1.0]).unwrap();
+        dtrain.set_label(&[0.0, 1.0, 0.0, 1.0]).unwrap();
         let mut dtest = DMatrix::from_dense(data, num_rows).unwrap();
-        dtest.set_labels(&[0.0, 1.0, 0.0, 1.0]).unwrap();
+        dtest.set_label(&[0.0, 1.0, 0.0, 1.0]).unwrap();
 
         let eval_sets = &[(&dtest, "test")];
         let bst = Booster::train(
