@@ -9,7 +9,6 @@ packages or manual compilation needed.
 ## Requirements
 
 - **Rust 1.71+** (uses [`raw-dylib`](https://doc.rust-lang.org/reference/items/external-blocks.html#the-link-attribute) for Windows linking)
-- **XGBoost 3.0.0 – 3.2.0** — these are the targeted versions. All are untested.
 - **No system dependencies** — XGBoost headers and shared library are downloaded automatically
 
 ## Documentation
