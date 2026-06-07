@@ -87,6 +87,8 @@ fn sha256_hex(data: &[u8]) -> String {
 /// Known SHA256 checksums for c_api.h by XGBoost version.
 fn known_header_checksum(version: &str) -> &'static str {
     match version {
+        "3.0.0" => "2ccec6e5301fa5a1324f60af48b9c6be5879e590ed583ec9d74297e6018860bc",
+        "3.1.0" => "c0f0a98eb36fb5e451fdd3e9ead2d185f4c61be2a6997fc295e5d1a94f3096e2",
         "3.2.0" => "30dd7487d154c84b7ba451bbc4f67637d7e338e64e9049b890468d7145f8508e",
         _ => panic!(
             "No known SHA256 checksum for XGBoost version {}. Add it to known_header_checksum().",

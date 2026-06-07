@@ -55,7 +55,7 @@ are also supported but untested. Set the `XGBOOST_VERSION` environment
 variable to choose a version:
 
 ```bash
-XGBOOST_VERSION=3.2.0 cargo build
+XGBOOST_VERSION=3.1.0 cargo build
 ```
 
 ## Using a PyPI mirror
