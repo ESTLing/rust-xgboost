@@ -9,6 +9,7 @@ packages or manual compilation needed.
 ## Requirements
 
 - **Rust 1.71+** (uses [`raw-dylib`](https://doc.rust-lang.org/reference/items/external-blocks.html#the-link-attribute) for Windows linking)
+- **XGBoost 3.2.0** — this is the only supported version. Other versions may work but are untested.
 - **No system dependencies** — XGBoost headers and shared library are downloaded automatically
 
 ## Documentation
@@ -50,11 +51,11 @@ fn main() {
 
 ## XGBoost version
 
-By default, `xgboost-rs` builds against XGBoost 3.2.0. Set the `XGBOOST_VERSION`
-environment variable to use a different version (must match a PyPI release):
+`xgboost-rs` currently targets **XGBoost 3.2.0 only**. The `XGBOOST_VERSION`
+environment variable can be used to try other versions, but they are not tested:
 
 ```bash
-XGBOOST_VERSION=3.1.1 cargo build
+XGBOOST_VERSION=3.2.0 cargo build
 ```
 
 ## Using a PyPI mirror
@@ -68,12 +69,12 @@ export RUST_PYPI_INDEX=https://pypi.tuna.tsinghua.edu.cn
 
 ## Supported Platforms
 
-| Platform    | Architecture | Status            |
-|-------------|-------------|-------------------|
-| Linux       | x86_64      | Supported         |
-| Linux       | aarch64     | Supported         |
-| macOS       | x86_64      | Supported |
-| macOS       | aarch64     | Supported         |
+| Platform    | Architecture | Status                          |
+|-------------|-------------|---------------------------------|
+| Linux       | x86_64      | Theoretical, not tested         |
+| Linux       | aarch64     | Theoretical, not tested         |
+| macOS       | x86_64      | Theoretical, not tested         |
+| macOS       | aarch64     | Theoretical, not tested         |
 | Windows     | x86_64      | Supported (Rust 1.71+ required) |
 
 ## License
