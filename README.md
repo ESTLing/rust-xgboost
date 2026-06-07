@@ -50,8 +50,9 @@ fn main() {
 
 ## XGBoost version
 
-`xgboost-rs` targets **XGBoost 3.0.0 – 3.2.0**. All versions are untested.
-Set the `XGBOOST_VERSION` environment variable to choose a version:
+`xgboost-rs` targets **XGBoost 3.2.0** (tested). Versions 3.0.0 and 3.1.0
+are also supported but untested. Set the `XGBOOST_VERSION` environment
+variable to choose a version:
 
 ```bash
 XGBOOST_VERSION=3.2.0 cargo build
