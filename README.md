@@ -11,10 +11,6 @@ packages or manual compilation needed.
 - **Rust 1.71+** (uses [`raw-dylib`](https://doc.rust-lang.org/reference/items/external-blocks.html#the-link-attribute) for Windows linking)
 - **No system dependencies** — XGBoost headers and shared library are downloaded automatically
 
-## Documentation
-
-* [Documentation](https://docs.rs/xgboost-rs)
-
 ## Basic usage
 
 ```rust
