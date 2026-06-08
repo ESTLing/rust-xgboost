@@ -5,7 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - Unreleased
+## [0.2.1] - Unreleased
+
+### Added
+- `inplace_predict(data, num_rows, config)` — predict directly from `&[f32]` without constructing `DMatrix`
+- `EarlyStopping::with_save_best()` — prune over-trained trees after training, matching Python's `save_best=True`
+
+### Changed
+- `predict()` now takes `&PredictConfig` directly; `predict_with_config` removed
+- `slice_trees()` internal method added on `Booster` for save_best tree pruning
+
+### Fixed
+- Test added: `save_best` predictions identical to `predict_with_best_epoch`
+
+## [0.2.0] - 2024-06-08
 
 ### Added
 - Training callback system (`TrainingCallback` trait):
@@ -14,7 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `add_callback()` setter — callbacks stored on `Booster`, `train()` stays at 3 params
 - `EvalsLog` type — per-iteration metric history returned by `train()`, passed to callbacks
 - `set_custom_metric()` — user-defined `(name, score)` pairs, visible to callbacks and early stopping
-- `predict_with_config()` — general tree-limited prediction using `PredictConfig`
 - `predict_with_best_epoch()` — convenience for early-stopping workflow
 - `set_params()` — batch parameter setter on `Booster`
 - `Booster::new(num_features)` — creates internal dummy matrix, no need to pass `&DMatrix` at construction
@@ -55,5 +67,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deprecated `XGDMatrixCreateFromFile` replaced in all load paths
 - Drop implementations safe against double-panic on cleanup failure
 
+[0.2.1]: https://github.com/ESTLing/rust-xgboost/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/ESTLing/rust-xgboost/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ESTLing/rust-xgboost/releases/tag/v0.1.0

@@ -12,7 +12,7 @@ along with the estimated effort and priority for each gap.
 
 | # | Python Method | Priority | Effort | Description |
 |---|--------------|----------|--------|-------------|
-| 1 | `inplace_predict()` | **High** | Medium | Predict without constructing DMatrix. Takes raw data + config JSON. |
+| 1 | `inplace_predict()` | **High** | Medium | ✅ `Booster::inplace_predict(data, nrows, config)` |
 | 2 | `eval()` / `eval_set()` | **High** | Small | Evaluate on a single or multiple DMatrices with custom metric support. Rust has `evaluate()` which returns raw scores but lacks iteration tracking, custom metric, and formatted output. |
 | 3 | `boost()` | **High** | Medium | One boosting round with custom gradient/hessian. Needed for custom training loops. |
 | 4 | `copy()` | Medium | Small | Deep-copy a booster. |
@@ -22,15 +22,16 @@ along with the estimated effort and priority for each gap.
 | 8 | `get_split_value_histogram()` | Low | Medium | Split value histogram for a given feature. |
 | 9 | `trees_to_dataframe()` | Low | Large | Export trees as pandas DataFrame. Requires pandas dependency or alternative. |
 | 10 | `num_boosted_rounds()` / `num_features()` | Medium | Small | Model metadata accessors. `num_features` already available indirectly via `evaluate()`. |
-| 11 | `best_iteration` / `best_score` | Medium | Small | ⬜ Attributes written by `EarlyStopping::after_training`; accessible via `get_attribute()`. No dedicated accessor yet. |
+| 11 | `best_iteration` / `best_score` | Medium | Small | ⬜ Attributes written by `EarlyStopping::after_training`; `save_best` prunes trees; accessible via `get_attribute()`. No dedicated accessor yet. |
 | 12 | `get_categories()` | Low | Medium | Get categorical feature information. |
 | 13 | `__getitem__()` / `__iter__()` | Low | Medium | Slice/iterate individual trees from the model. |
 
 ### Booster: Parameter & Predict Notes
 
 - **Rust `predict()`** is split into `predict`, `predict_margin`, `predict_leaf`, `predict_contributions`, `predict_interactions`. Python uses a single `predict()` with keyword flags. Both approaches are valid.
-- `predict_with_config(config)` provides tree limiting (`iteration_end`), covering the `iteration_range` use case.
+- `predict(dmat, config)` provides tree limiting (`iteration_end`), covering the `iteration_range` use case.
 - `predict_with_best_epoch(epoch)` is a convenience for early stopping workflows.
+- `inplace_predict(data, nrows, config)` predicts from raw `&[f32]` without DMatrix construction.
 - **Rust `dump_model()`** returns a `String`; Python returns `List[str]` via `get_dump()`. Rust also has `dump_model_vec()`. Parity is acceptable.
 - **`set_param()` / `set_params()`** exist in both.
 - **Attribute system**: Rust has `get_attribute`/`set_attribute`/`get_attribute_names`, Python has `attr`/`attributes`/`set_attr`. Covered.
@@ -138,7 +139,7 @@ Python's `get_score()` with `importance_type` supports: `"weight"`, `"gain"`, `"
 |---|---------|--------|
 | 1 | Custom objective + custom metric in `Booster::train()` | ⬜ custom metric ✅, objective ❌ |
 | 2 | `Booster::boost()` — single-step boosting with custom grad/hess | ❌ |
-| 3 | `Booster::inplace_predict()` — predict from raw data | ❌ |
+| 3 | `Booster::inplace_predict()` — predict from raw data | ✅ `inplace_predict(data, nrows, config)` |
 | 4 | `EarlyStopping` callback (+ `evals_result`, `early_stopping_rounds`, `maximize`, `verbose_eval`) | ✅ |
 | 5 | `Booster::eval_set()` — multi-eval evaluation with iteration tracking | ✅ |
 
@@ -152,7 +153,7 @@ Python's `get_score()` with `importance_type` supports: `"weight"`, `"gain"`, `"
 | 9 | `cv()` — cross-validation | ❌ |
 | 10 | `copy()` / `reset()` — booster lifecycle | ❌ |
 | 11 | `save_config()` / `load_config()` — config serialization | ❌ |
-| 12 | `num_boosted_rounds()` / `best_iteration` / `best_score` — metadata access | ⬜ attributes written by `EarlyStopping`, no accessors yet |
+| 12 | `num_boosted_rounds()` / `best_iteration` / `best_score` — metadata access | ⬜ attributes + `save_best` implemented, no accessors yet |
 
 ### Phase 3: Advanced Features (Nice to Have)
 
