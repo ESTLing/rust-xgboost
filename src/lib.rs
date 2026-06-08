@@ -93,6 +93,7 @@ macro_rules! json_cstr {
 mod error;
 pub use error::{XGBError, XGBResult};
 
+mod callback;
 mod dmatrix;
 pub use dmatrix::{DMatrix, KEY_GROUP, KEY_GROUP_PTR, KEY_LABEL, KEY_WEIGHT, KEY_BASE_MARGIN, KEY_LABEL_LOWER_BOUND, KEY_LABEL_UPPER_BOUND, KEY_QID};
 

@@ -18,7 +18,7 @@ along with the estimated effort and priority for each gap.
 | 4 | `copy()` | Medium | Small | Deep-copy a booster. |
 | 5 | `reset()` | Medium | Small | Reset booster to initial state. |
 | 6 | `save_config()` / `load_config()` | Medium | Small | Save/load internal configuration as JSON string. |
-| 7 | `get_score()` / `get_fscore()` | Medium | Small | Feature importance scores (multiple `importance_type`s). Rust has `get_feature_names()` but not scores. |
+| 7 | `get_score()` / `get_fscore()` | Medium | Small | ✅ `get_score(importance_type, feature_names)` — returns `Vec<(String, f32)>` sorted descending. |
 | 8 | `get_split_value_histogram()` | Low | Medium | Split value histogram for a given feature. |
 | 9 | `trees_to_dataframe()` | Low | Large | Export trees as pandas DataFrame. Requires pandas dependency or alternative. |
 | 10 | `num_boosted_rounds()` / `num_features()` | Medium | Small | Model metadata accessors. `num_features` already available indirectly via `evaluate()`. |
@@ -114,7 +114,7 @@ Missing input types:
 
 ### Feature Map
 
-Python's `get_score()` with `importance_type` supports: `"weight"`, `"gain"`, `"cover"`, `"total_gain"`, `"total_cover"`. Rust has no equivalent yet.
+Python's `get_score()` with `importance_type` supports: `"weight"`, `"gain"`, `"cover"`, `"total_gain"`, `"total_cover"`. ✅ Implemented.
 
 ---
 
@@ -148,7 +148,7 @@ Python's `get_score()` with `importance_type` supports: `"weight"`, `"gain"`, `"
 |---|---------|--------|
 | 6 | `QuantileDMatrix` — histogram-based memory-efficient DMatrix | ❌ |
 | 7 | `DataIter` — streaming data iterator abstraction | ❌ |
-| 8 | `Booster::get_score()` — feature importance | ❌ |
+| 8 | `Booster::get_score()` — feature importance | ✅ |
 | 9 | `cv()` — cross-validation | ❌ |
 | 10 | `copy()` / `reset()` — booster lifecycle | ❌ |
 | 11 | `save_config()` / `load_config()` — config serialization | ❌ |
