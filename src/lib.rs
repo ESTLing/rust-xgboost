@@ -29,12 +29,11 @@
 //!         ("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic"),
 //!     ]).unwrap();
 //!
-//!     let mut monitor = EvaluationMonitor::new(1);
+//!     booster.add_callback(Box::new(EvaluationMonitor::new(1)));
 //!     let history = booster.train(
 //!         &dtrain,
 //!         2,
 //!         &[(&dtrain, "train"), (&dtest, "test")],
-//!         &mut [&mut monitor],
 //!     ).unwrap();
 //!
 //!     println!("{:?}", booster.predict(&dtest).unwrap());
@@ -98,7 +97,7 @@ mod dmatrix;
 pub use dmatrix::{DMatrix, KEY_GROUP, KEY_GROUP_PTR, KEY_LABEL, KEY_WEIGHT, KEY_BASE_MARGIN, KEY_LABEL_LOWER_BOUND, KEY_LABEL_UPPER_BOUND, KEY_QID};
 
 mod booster;
-pub use booster::{Booster, EvalsLog, EvaluationMonitor, FeatureMap, FeatureType, PredictConfig, PredictType, TrainingCallback};
+pub use booster::{Booster, EarlyStopping, EvalsLog, EvaluationMonitor, FeatureMap, FeatureType, PredictConfig, PredictType, TrainingCallback};
 use std::{ffi, path::Path};
 
 #[cfg(not(target_os = "windows"))]

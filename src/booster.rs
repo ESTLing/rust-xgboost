@@ -128,7 +128,8 @@ pub trait TrainingCallback {
 /// # let dtrain = DMatrix::from_dense(&[1.0], 1).unwrap();
 /// # let mut booster = Booster::new(1).unwrap();
 /// let mut monitor = EvaluationMonitor::new(1); // print every iteration
-/// booster.train(10, &[], &mut [&mut monitor]).unwrap();
+/// booster.add_callback(Box::new(monitor));
+/// booster.train(&dtrain, 10, &[]).unwrap();
 /// ```
 pub struct EvaluationMonitor {
     period: usize,
@@ -166,6 +167,133 @@ impl TrainingCallback for EvaluationMonitor {
     }
 }
 
+/// Built-in callback for early stopping, matching Python's
+/// [`EarlyStopping`](https://xgboost.readthedocs.io/en/latest/python/callbacks.html).
+///
+/// Monitors a metric on a given eval dataset. If it does not improve for `rounds`
+/// consecutive iterations, training stops.
+///
+/// If `metric_name` or `data_name` is `None`, the last one in [`EvalsLog`] is used.
+///
+/// # Examples
+///
+/// ```no_run
+/// # use xgboost_rs::{Booster, DMatrix, EarlyStopping, EvaluationMonitor};
+/// # let dtrain = DMatrix::from_dense(&[1.0, 2.0], 1).unwrap();
+/// # let dtest = DMatrix::from_dense(&[1.0, 2.0], 1).unwrap();
+/// let mut booster = Booster::new(2).unwrap();
+/// booster.set_params(&[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")]).unwrap();
+/// booster.set_param("eval_metric", "logloss").unwrap();
+/// booster.add_callback(Box::new(EvaluationMonitor::new(1)));
+/// booster.add_callback(Box::new(EarlyStopping::new(5, "test", "logloss", false)));
+/// booster.train(&dtrain, 100, &[(&dtest, "test")]).unwrap();
+/// ```
+pub struct EarlyStopping {
+    rounds: usize,
+    metric_name: Option<String>,
+    data_name: Option<String>,
+    maximize: Option<bool>,
+    min_delta: f32,
+    current_rounds: usize,
+    best_score: Option<f32>,
+}
+
+impl EarlyStopping {
+    /// Create an early-stopping callback.
+    ///
+    /// * `rounds` — consecutive rounds without improvement before stopping
+    /// * `data_name` — eval dataset name to monitor (last dataset if empty string)
+    /// * `metric_name` — metric to monitor (last metric if empty string)
+    /// * `maximize` — `true` if higher is better, `false` if lower. `None` for auto-detect
+    ///   (currently defaults to minimize).
+    pub fn new(rounds: usize, data_name: &str, metric_name: &str, maximize: bool) -> Self {
+        assert!(rounds > 0, "EarlyStopping rounds must be greater than 0");
+        Self {
+            rounds,
+            data_name: if data_name.is_empty() { None } else { Some(data_name.to_string()) },
+            metric_name: if metric_name.is_empty() { None } else { Some(metric_name.to_string()) },
+            maximize: Some(maximize),
+            min_delta: 0.0,
+            current_rounds: 0,
+            best_score: None,
+        }
+    }
+
+    /// Set the minimum absolute change in score to qualify as an improvement.
+    ///
+    /// Defaults to `0.0` — any improvement counts.
+    pub fn with_min_delta(mut self, delta: f32) -> Self {
+        self.min_delta = delta;
+        self
+    }
+}
+
+impl TrainingCallback for EarlyStopping {
+    fn after_iteration(&mut self, _booster: &Booster, _epoch: u32, evals_log: &EvalsLog) -> bool {
+        if evals_log.is_empty() {
+            return false;
+        }
+
+        // Pick data set: user-specified or last one
+        let data_name = self
+            .data_name
+            .as_deref()
+            .or_else(|| evals_log.keys().last().map(|s| s.as_str()))
+            .unwrap_or("");
+        let data_log = match evals_log.get(data_name) {
+            Some(d) => d,
+            None => return false,
+        };
+
+        // Pick metric: user-specified or last one
+        let metric_name = self
+            .metric_name
+            .as_deref()
+            .or_else(|| data_log.keys().last().map(|s| s.as_str()))
+            .unwrap_or("");
+        let scores = match data_log.get(metric_name) {
+            Some(s) => s,
+            None => return false,
+        };
+
+        let score = match scores.last() {
+            Some(s) => *s,
+            None => return false,
+        };
+
+        // Determine direction
+        let maximize = self.maximize.unwrap_or(false);
+
+        match self.best_score {
+            None => {
+                self.best_score = Some(score);
+                self.current_rounds = 0;
+            }
+            Some(best) => {
+                let improved = if maximize {
+                    score - self.min_delta > best
+                } else {
+                    score + self.min_delta < best
+                };
+                if improved {
+                    self.best_score = Some(score);
+                    self.current_rounds = 0;
+                } else {
+                    self.current_rounds += 1;
+                }
+            }
+        }
+
+        self.current_rounds >= self.rounds
+    }
+
+    fn after_training(&mut self, _booster: &Booster) {
+        // Reset for reuse
+        self.current_rounds = 0;
+        self.best_score = None;
+    }
+}
+
 /// Core model in XGBoost, containing functions for training, evaluating and predicting.
 ///
 /// Create with [`new`](struct.Booster.html#method.new), then call [`train`](struct.Booster.html#method.train).
@@ -174,6 +302,8 @@ impl TrainingCallback for EvaluationMonitor {
 pub struct Booster {
     handle: xgboost_sys::BoosterHandle,
     _dummy_dmatrix: Option<DMatrix>,
+    callbacks: Vec<Box<dyn TrainingCallback>>,
+    custom_metric: Option<Box<dyn Fn(&[f32], &DMatrix) -> Vec<(String, f32)>>>,
 }
 
 impl Booster {
@@ -194,6 +324,8 @@ impl Booster {
         Ok(Booster {
             handle,
             _dummy_dmatrix: Some(dummy),
+            callbacks: Vec::new(),
+            custom_metric: None,
         })
     }
 
@@ -237,6 +369,8 @@ impl Booster {
         Ok(Booster {
             handle,
             _dummy_dmatrix: None,
+            callbacks: Vec::new(),
+            custom_metric: None,
         })
     }
 
@@ -254,21 +388,61 @@ impl Booster {
         Ok(Booster {
             handle,
             _dummy_dmatrix: None,
+            callbacks: Vec::new(),
+            custom_metric: None,
         })
+    }
+
+    /// Add a training callback.
+    ///
+    /// Callbacks are invoked in insertion order after each iteration. Any callback
+    /// returning `true` from [`after_iteration`](TrainingCallback::after_iteration)
+    /// stops training early.
+    ///
+    /// ```
+    /// # use xgboost_rs::{Booster, EvaluationMonitor};
+    /// # let mut booster = Booster::new(2).unwrap();
+    /// booster.add_callback(Box::new(EvaluationMonitor::new(1)));
+    /// ```
+    pub fn add_callback(&mut self, cb: Box<dyn TrainingCallback>) {
+        self.callbacks.push(cb);
+    }
+
+    /// Set a custom evaluation metric, matching Python's `custom_metric` / `feval`.
+    ///
+    /// The closure receives predictions and the eval matrix, and returns one or more
+    /// `(metric_name, score)` pairs. Called every iteration on each eval set; results
+    /// appear in [`EvalsLog`] alongside built-in metrics and are visible to callbacks.
+    ///
+    /// ```
+    /// # use xgboost_rs::{Booster, DMatrix};
+    /// # let mut booster = Booster::new(2).unwrap();
+    /// booster.set_custom_metric(Box::new(|preds: &[f32], dmat: &DMatrix| -> Vec<(String, f32)> {
+    ///     let labels = dmat.get_label().unwrap();
+    ///     let mse = preds.iter().zip(labels)
+    ///         .map(|(p, l)| (p - l).powi(2)).sum::<f32>() / preds.len() as f32;
+    ///     vec![("mse".into(), mse)]
+    /// }));
+    /// ```
+    pub fn set_custom_metric(
+        &mut self,
+        metric: Box<dyn Fn(&[f32], &DMatrix) -> Vec<(String, f32)>>,
+    ) {
+        self.custom_metric = Some(metric);
     }
 
     /// Train this model for a given number of boosting rounds.
     ///
     /// Evaluates on `eval_sets` every iteration, accumulating results into the returned
-    /// [`EvalsLog`]. Callbacks (e.g. [`EvaluationMonitor`]) are invoked after each iteration
-    /// and can stop training early by returning `true`.
+    /// [`EvalsLog`]. Callbacks (added via [`add_callback`](Booster::add_callback)) and
+    /// custom metrics (set via [`set_custom_metric`](Booster::set_custom_metric)) are
+    /// invoked automatically.
     ///
     /// # Parameters
     ///
     /// * `dtrain` — training data matrix
     /// * `boost_rounds` — number of boosting iterations
     /// * `eval_sets` — evaluation datasets with names, e.g. `&[(&dtest, "test")]`
-    /// * `callbacks` — mutable slice of [`TrainingCallback`] trait objects
     ///
     /// # Errors
     ///
@@ -284,13 +458,11 @@ impl Booster {
     /// booster.set_params(&[
     ///     ("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic"),
     /// ]).unwrap();
-    ///
-    /// let mut monitor = EvaluationMonitor::new(1);
+    /// booster.add_callback(Box::new(EvaluationMonitor::new(1)));
     /// let history = booster.train(
     ///     &dtrain,
     ///     10,
     ///     &[(&dtest, "test")],
-    ///     &mut [&mut monitor],
     /// ).unwrap();
     /// ```
     pub fn train(
@@ -298,7 +470,6 @@ impl Booster {
         dtrain: &DMatrix,
         boost_rounds: u32,
         eval_sets: &[(&DMatrix, &str)],
-        callbacks: &mut [&mut dyn TrainingCallback],
     ) -> XGBResult<EvalsLog> {
         let mut evals_log: EvalsLog = BTreeMap::new();
 
@@ -311,7 +482,6 @@ impl Booster {
 
             // Evaluate on all eval sets
             let eval_results = self.eval_set(eval_sets, i as i32)?;
-            // eval_results: HashMap<data_name, HashMap<metric_name, score>>
             for (data_name, metrics) in &eval_results {
                 let entry = evals_log.entry(data_name.clone()).or_default();
                 for (metric_name, score) in metrics {
@@ -319,21 +489,37 @@ impl Booster {
                 }
             }
 
+            // Compute custom metrics
+            if let Some(ref metric) = self.custom_metric {
+                for (dmat, name) in eval_sets {
+                    let preds = self.predict(dmat)?;
+                    let custom_metrics = metric(&preds, dmat);
+                    let entry = evals_log.entry(name.to_string()).or_default();
+                    for (metric_name, score) in custom_metrics {
+                        entry.entry(metric_name).or_default().push(score);
+                    }
+                }
+            }
+
             // Invoke callbacks
             let mut should_stop = false;
-            for cb in callbacks.iter_mut() {
+            let mut callbacks = std::mem::take(&mut self.callbacks);
+            for cb in &mut *callbacks {
                 if cb.after_iteration(self, i, &evals_log) {
                     should_stop = true;
                 }
             }
+            self.callbacks = callbacks;
             if should_stop {
                 break;
             }
         }
 
-        for cb in callbacks.iter_mut() {
+        let mut callbacks = std::mem::take(&mut self.callbacks);
+        for cb in &mut *callbacks {
             cb.after_training(self);
         }
+        self.callbacks = callbacks;
 
         Ok(evals_log)
     }
@@ -1062,7 +1248,7 @@ mod tests {
         let mut bst = Booster::new(2).expect("Creating Booster failed");
         bst.set_params(&[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")])
             .expect("set_params failed");
-        bst.train(&dtrain, 2, eval_sets, &mut []).unwrap();
+        bst.train(&dtrain, 2, eval_sets).unwrap();
 
         let preds = bst.predict(&dtest).unwrap();
         assert_eq!(preds.len(), 4);

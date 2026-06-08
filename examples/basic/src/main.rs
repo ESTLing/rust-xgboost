@@ -1,4 +1,4 @@
-use xgboost_rs::{Booster, DMatrix, EvaluationMonitor};
+use xgboost_rs::{Booster, DMatrix, EarlyStopping, EvaluationMonitor};
 
 fn main() {
     // Create a simple synthetic dataset: 8 rows, 3 features
@@ -23,12 +23,24 @@ fn main() {
     println!("\nTraining tree booster...");
     let mut booster = Booster::new(3).expect("Booster::new");
     booster
-        .set_params(&[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")])
+        .set_params(&[
+            ("max_depth", "2"),
+            ("eta", "1.0"),
+            ("objective", "binary:logistic"),
+            ("eval_metric", "logloss"),
+        ])
         .expect("set_params");
-    let mut monitor = EvaluationMonitor::new(1);
-    let _ = booster
-        .train(&dtrain, 10, eval_sets, &mut [&mut monitor])
+    booster.add_callback(Box::new(EvaluationMonitor::new(1)));
+    booster.add_callback(Box::new(EarlyStopping::new(
+        3,       // stop after 3 rounds without improvement
+        "test",  // monitor "test" dataset
+        "",      // last metric (logloss)
+        false,   // minimize
+    )));
+    let history = booster
+        .train(&dtrain, 10, eval_sets)
         .expect("train");
+    println!("Trained {} rounds", history.values().next().unwrap().values().next().unwrap().len());
 
     // Predict
     let preds = booster.predict(&dtest).expect("predict");
@@ -64,6 +76,6 @@ fn main() {
     let mut bst = Booster::new(3).expect("Booster::new for csr");
     bst.set_params(&[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")])
         .expect("set_params csr");
-    bst.train(&dmat, 2, &[], &mut []).expect("train csr");
+    bst.train(&dmat, 2, &[]).expect("train csr");
     println!("CSR predictions: {:?}", bst.predict(&dmat).expect("predict csr"));
 }

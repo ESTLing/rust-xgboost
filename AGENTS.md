@@ -20,7 +20,7 @@ let mut booster = Booster::new(3)?;                     // feature count
 booster.set_params(&[
     ("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic"),
 ])?;
-let history = booster.train(&dtrain, 10, &[(&dtest, "test")], &mut callbacks)?;
+let history = booster.train(&dtrain, 10, &[(&dtest, "test")])?;
 ```
 
 ### Build: PyPI wheel, no system dependencies
@@ -54,7 +54,10 @@ Three-layer separation, matching Python's design:
 
 - `EvalsLog` lives as a local variable inside `train()`; callbacks receive `&EvalsLog` for read-only access.
 - Callbacks are traversed in order; returning `true` from `after_iteration` breaks the training loop (early stopping).
-- `train()` signature is fixed at 4 params (`dtrain`, `boost_rounds`, `eval_sets`, `callbacks`) — `num_features` goes into `Booster::new()`; new features go into callback impls, not new parameters.
+- `train()` signature is fixed at 3 params (`dtrain`, `boost_rounds`, `eval_sets`). Callbacks are added
+  via [`add_callback`](Booster::add_callback), custom metrics via
+  [`set_custom_metric`](Booster::set_custom_metric) — new features go into callback impls or
+  setters, not parameters.
 - `train()` returns `XGBResult<EvalsLog>` so the caller can inspect training history.
 
 ## Reference implementation
