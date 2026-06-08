@@ -42,6 +42,13 @@ XGBoost 3.2+ C API expects `__array_interface__` JSON (Python numpy protocol) fo
 `XGDMatrixCreateFromDense`/`CreateFromCSR`/`CreateFromCSC` take JSON strings containing
 memory pointers and shape info, not raw float/int pointers.
 
+### Booster: num_features constructor
+
+`Booster::new(num_features)` creates an internal 1×N dummy `DMatrix` for
+`XGBoosterCreate`, kept alive as `_dummy_dmatrix`. This sets `num_feature` without
+requiring the user's training data at construction time. The actual training matrix
+is passed to `train()`.
+
 ### Training callback architecture
 
 Three-layer separation, matching Python's design:
@@ -59,6 +66,25 @@ Three-layer separation, matching Python's design:
   [`set_custom_metric`](Booster::set_custom_metric) — new features go into callback impls or
   setters, not parameters.
 - `train()` returns `XGBResult<EvalsLog>` so the caller can inspect training history.
+- `after_training` receives `&mut Booster` — callbacks can mutate the model (e.g. `EarlyStopping::with_save_best`
+  calls `slice_trees` to prune over-trained trees).
+
+### Predict API
+
+All prediction goes through a single JSON-based C API (`XGBoosterPredictFromDMatrix` for DMatrix,
+`XGBoosterPredictFromDense` for raw data). Tree limiting is controlled via `PredictConfig`.
+
+| Method | Input | When |
+|--------|-------|------|
+| `predict(dmat, config)` | `&DMatrix` + `&PredictConfig` | Standard prediction |
+| `predict_with_best_epoch(dmat, epoch)` | `&DMatrix` + best round | Early stopping convenience |
+| `inplace_predict(data, nrows, config)` | `&[f32]` + row count | No DMatrix overhead |
+
+### Callback module (`src/callback.rs`)
+
+Separate crate-private module containing `TrainingCallback`, `EvalsLog`, `EvaluationMonitor`,
+and `EarlyStopping`. Callbacks access `Booster` via `crate::Booster`; internal methods like
+`slice_trees` are `pub(crate)`.
 
 ## Reference implementation
 
@@ -93,11 +119,13 @@ Reference: [rustdoc how-to](https://rustwiki.org/zh-CN/rustdoc/how-to-write-docu
 ## File map
 
 ```
-src/lib.rs            — crate root, xgb_call! macro, path_to_c_str helper
-src/booster.rs         — Booster: train, predict, save/load, eval
+src/lib.rs            — crate root, xgb_call! macro, json_cstr! macro, path_to_c_str helper
+src/booster.rs         — Booster: train, predict, save/load, eval, inplace_predict, slice_trees
+src/callback.rs        — TrainingCallback, EvalsLog, EvaluationMonitor, EarlyStopping
 src/dmatrix.rs         — DMatrix: from_dense, from_csr, from_csc, load, save
 src/error.rs           — XGBError, XGBResult
 xgboost-sys/build.rs   — PyPI download, header verification, bindgen, raw-dylib injection
 xgboost-sys/src/lib.rs — include! bindings.rs
-examples/              — basic, generalised_linear_model, multiclass_classification
+examples/basic/        — basic training with callbacks and early stopping
+doc/                   — gap-analysis.md, etc.
 ```
