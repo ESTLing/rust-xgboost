@@ -54,7 +54,7 @@ macro_rules! xgb_call {
 
 // Sentinel string used as a placeholder for the JSON5 literal `NaN` in config values.
 // `serde_json` serializes `f64::NAN` as `null`, but XGBoost's JSON parser expects the
-// bare literal `NaN`. Used in `json_str!` — the macro replaces it after serialization.
+// bare literal `NaN`. Used in `json_cstr!` — the macro replaces it after serialization.
 const NAN_SENTINEL: &str = "\x00NaN";
 
 /// Build an XGBoost-compatible JSON string from key-value pairs, returning a [`CString`].
@@ -70,11 +70,11 @@ const NAN_SENTINEL: &str = "\x00NaN";
 ///
 /// ```ignore
 /// // DMatrix construction config
-/// let config = json_str!("missing" => NAN_SENTINEL, "nthread" => 0);
+/// let config = json_cstr!("missing" => NAN_SENTINEL, "nthread" => 0);
 /// // → {"missing":NaN,"nthread":0}
 ///
 /// // __array_interface__ for dense data
-/// let ai = json_str!(
+/// let ai = json_cstr!(
 ///     "data" => [ptr as usize, false],
 ///     "shape" => [3, 2],
 ///     "typestr" => "<f4",
@@ -82,11 +82,11 @@ const NAN_SENTINEL: &str = "\x00NaN";
 /// );
 /// // → {"data":[1407000,false],"shape":[3,2],"typestr":"<f4","version":3}
 /// ```
-macro_rules! json_str {
+macro_rules! json_cstr {
     ($($key:expr => $val:expr),* $(,)?) => {{
         let value = serde_json::json!({$($key: $val),*});
-        let json_str = value.to_string().replace("\"\\u0000NaN\"", "NaN");
-        std::ffi::CString::new(json_str).unwrap()
+        let json_cstr = value.to_string().replace("\"\\u0000NaN\"", "NaN");
+        std::ffi::CString::new(json_cstr).unwrap()
     }};
 }
 

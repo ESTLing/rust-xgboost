@@ -139,13 +139,13 @@ impl DMatrix {
     pub fn from_dense(data: &[f32], num_rows: usize) -> XGBResult<Self> {
         let num_cols = data.len() / num_rows;
         let mut handle = ptr::null_mut();
-        let array_json = json_str!(
+        let array_json = json_cstr!(
             "data" => serde_json::json!([data.as_ptr() as usize, false]),
             "shape" => [num_rows, num_cols],
             "typestr" => Self::ftypestr(4),
             "version" => 3,
         );
-        let config = json_str!("missing" => NAN_SENTINEL, "nthread" => 0, "data_split_mode" => 0);
+        let config = json_cstr!("missing" => NAN_SENTINEL, "nthread" => 0, "data_split_mode" => 0);
         xgb_call!(xgboost_sys::XGDMatrixCreateFromDense(
             array_json.as_ptr(),
             config.as_ptr(),
@@ -162,10 +162,10 @@ impl DMatrix {
         let indptr: Vec<u64> = indptr.iter().map(|x| *x as u64).collect();
         let indices: Vec<u32> = indices.iter().map(|x| *x as u32).collect();
         let ncol = num_cols.unwrap_or(0) as u64;
-        let indptr_json = json_str!("data" => serde_json::json!([indptr.as_ptr() as usize, false]), "shape" => [indptr.len()], "typestr" => Self::utypestr(8), "version" => 3);
-        let indices_json = json_str!("data" => serde_json::json!([indices.as_ptr() as usize, false]), "shape" => [indices.len()], "typestr" => Self::utypestr(4), "version" => 3);
-        let data_json = json_str!("data" => serde_json::json!([data.as_ptr() as usize, false]), "shape" => [data.len()], "typestr" => Self::ftypestr(4), "version" => 3);
-        let config = json_str!("missing" => NAN_SENTINEL, "nthread" => 0, "data_split_mode" => 0);
+        let indptr_json = json_cstr!("data" => serde_json::json!([indptr.as_ptr() as usize, false]), "shape" => [indptr.len()], "typestr" => Self::utypestr(8), "version" => 3);
+        let indices_json = json_cstr!("data" => serde_json::json!([indices.as_ptr() as usize, false]), "shape" => [indices.len()], "typestr" => Self::utypestr(4), "version" => 3);
+        let data_json = json_cstr!("data" => serde_json::json!([data.as_ptr() as usize, false]), "shape" => [data.len()], "typestr" => Self::ftypestr(4), "version" => 3);
+        let config = json_cstr!("missing" => NAN_SENTINEL, "nthread" => 0, "data_split_mode" => 0);
         xgb_call!(xgboost_sys::XGDMatrixCreateFromCSR(
             indptr_json.as_ptr(),
             indices_json.as_ptr(),
@@ -185,10 +185,10 @@ impl DMatrix {
         let indptr: Vec<u64> = indptr.iter().map(|x| *x as u64).collect();
         let indices: Vec<u32> = indices.iter().map(|x| *x as u32).collect();
         let nrow = num_rows.unwrap_or(0) as u64;
-        let indptr_json = json_str!("data" => serde_json::json!([indptr.as_ptr() as usize, false]), "shape" => [indptr.len()], "typestr" => Self::utypestr(8), "version" => 3);
-        let indices_json = json_str!("data" => serde_json::json!([indices.as_ptr() as usize, false]), "shape" => [indices.len()], "typestr" => Self::utypestr(4), "version" => 3);
-        let data_json = json_str!("data" => serde_json::json!([data.as_ptr() as usize, false]), "shape" => [data.len()], "typestr" => Self::ftypestr(4), "version" => 3);
-        let config = json_str!("missing" => NAN_SENTINEL, "nthread" => 0, "data_split_mode" => 0);
+        let indptr_json = json_cstr!("data" => serde_json::json!([indptr.as_ptr() as usize, false]), "shape" => [indptr.len()], "typestr" => Self::utypestr(8), "version" => 3);
+        let indices_json = json_cstr!("data" => serde_json::json!([indices.as_ptr() as usize, false]), "shape" => [indices.len()], "typestr" => Self::utypestr(4), "version" => 3);
+        let data_json = json_cstr!("data" => serde_json::json!([data.as_ptr() as usize, false]), "shape" => [data.len()], "typestr" => Self::ftypestr(4), "version" => 3);
+        let config = json_cstr!("missing" => NAN_SENTINEL, "nthread" => 0, "data_split_mode" => 0);
         xgb_call!(xgboost_sys::XGDMatrixCreateFromCSC(
             indptr_json.as_ptr(),
             indices_json.as_ptr(),
@@ -225,7 +225,7 @@ impl DMatrix {
     pub fn load<P: AsRef<Path>>(path: P) -> XGBResult<Self> {
         debug!("Loading DMatrix from: {}", path.as_ref().display());
         let mut handle = ptr::null_mut();
-        let config = json_str!("uri" => path.as_ref().to_string_lossy(), "silent" => 1);
+        let config = json_cstr!("uri" => path.as_ref().to_string_lossy(), "silent" => 1);
         xgb_call!(xgboost_sys::XGDMatrixCreateFromURI(config.as_ptr(), &mut handle))?;
         DMatrix::new(handle)
     }

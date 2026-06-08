@@ -40,15 +40,14 @@ pub struct PredictConfig {
 }
 
 impl PredictConfig {
-    /// returns 0 terminated json of the config, mainly for usage in predict_matrix
-    pub fn as_json(&self) -> String {
-        format!(
-            "{{\"type\":{},\"training\":{},\"iteration_begin\":{},\"iteration_end\":{},\"strict_shape\":{}}}\0",
-            self._type.clone() as usize,
-            self.training,
-            self.iteration_begin,
-            self.iteration_end,
-            self.strict_shape
+    /// Returns JSON C string for [`predict_with_config`].
+    pub fn as_cstr(&self) -> std::ffi::CString {
+        json_cstr!(
+            "type" => self._type.clone() as usize,
+            "training" => self.training,
+            "iteration_begin" => self.iteration_begin,
+            "iteration_end" => self.iteration_end,
+            "strict_shape" => self.strict_shape,
         )
     }
 }
@@ -728,66 +727,88 @@ impl Booster {
         ))
     }
 
-    /// Predict results for given data.
+    /// Predict results for given data, using all trees.
     ///
-    /// config_json should be a 0 terminated string, preferred created by PredictConfig::as_json
-    /// Returns an array containing one entry per row in the given data and its shape as array.
-    pub fn predict_matrix(&self, dmat: &DMatrix, config_json: &str) -> XGBResult<(Vec<f32>, Vec<u64>)> {
-        let str_buffer: std::ffi::CString;
-        let cfg = if !config_json.is_empty() && config_json.ends_with('\u{0}') {
-            unsafe { std::ffi::CStr::from_ptr(config_json.as_ptr() as *const raw::c_char) }
-        } else {
-            str_buffer = std::ffi::CString::new(config_json).unwrap();
-            str_buffer.as_c_str()
-        };
+    /// Returns an array containing one entry per row in the given data.
+    /// Uses the `XGBoosterPredictFromDMatrix` C API with default config.
+    ///
+    /// For fine-grained control, use [`predict_with_config`](Booster::predict_with_config).
+    pub fn predict(&self, dmat: &DMatrix) -> XGBResult<Vec<f32>> {
+        self.predict_with_config(dmat, &PredictConfig::default())
+    }
+
+    /// Predict with a custom configuration.
+    ///
+    /// The config's `iteration_end` limits which trees are used (0 = all).
+    /// Common use cases:
+    ///
+    /// | Scenario | Config |
+    /// |----------|--------|
+    /// | All trees (default) | `PredictConfig::default()` |
+    /// | First N trees | `PredictConfig { iteration_end: n, ..Default::default() }` |
+    /// | Trees in range | `PredictConfig { iteration_begin: a, iteration_end: b, .. }` |
+    ///
+    /// ```
+    /// # use xgboost_rs::{Booster, DMatrix, PredictConfig};
+    /// # let dtrain = DMatrix::from_dense(&[1.0, 2.0], 1).unwrap();
+    /// # let mut booster = Booster::new(2).unwrap();
+    /// # booster.set_params(&[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")]).unwrap();
+    /// # booster.train(&dtrain, 2, &[]).unwrap();
+    /// let config = PredictConfig {
+    ///     iteration_end: 25,
+    ///     ..Default::default()
+    /// };
+    /// let preds = booster.predict_with_config(&dtrain, &config)?;
+    /// # Ok::<(), xgboost_rs::XGBError>(())
+    /// ```
+    pub fn predict_with_config(&self, dmat: &DMatrix, config: &PredictConfig) -> XGBResult<Vec<f32>> {
+        let cstr = config.as_cstr();
         let mut out_shape = ptr::null();
         let mut out_shape_dim = 0;
         let mut out_result = ptr::null();
         xgb_call!(xgboost_sys::XGBoosterPredictFromDMatrix(
             self.handle,
             dmat.handle,
-            cfg.as_ptr() as *const raw::c_char,
+            cstr.as_ptr() as *const raw::c_char,
             &mut out_shape,
             &mut out_shape_dim,
             &mut out_result
         ))?;
         if out_result.is_null() {
-            return Err(XGBError::new("predict_matrix: null result pointer".to_string()));
-        }
-        let shape = unsafe { slice::from_raw_parts(out_shape, out_shape_dim as usize).to_vec() };
-        let mut data_size = 1;
-        for dim in &shape {
-            data_size *= dim;
-        }
-        let data = unsafe { slice::from_raw_parts(out_result, data_size as usize).to_vec() };
-
-        Ok((data, shape))
-    }
-
-    /// Predict results for given data.
-    ///
-    /// Returns an array containing one entry per row in the given data.
-    /// Uses old call to XGBoosterPredict
-    pub fn predict(&self, dmat: &DMatrix) -> XGBResult<Vec<f32>> {
-        let option_mask = PredictOption::options_as_mask(&[]);
-        let ntree_limit = 0;
-        let mut out_len = 0;
-        let mut out_result = ptr::null();
-        xgb_call!(xgboost_sys::XGBoosterPredict(
-            self.handle,
-            dmat.handle,
-            option_mask,
-            ntree_limit,
-            0,
-            &mut out_len,
-            &mut out_result
-        ))?;
-
-        if out_result.is_null() {
             return Err(XGBError::new("predict: null result pointer".to_string()));
         }
-        let data = unsafe { slice::from_raw_parts(out_result, out_len as usize).to_vec() };
+        let shape = unsafe { slice::from_raw_parts(out_shape, out_shape_dim as usize) };
+        let data_size: usize = shape.iter().map(|&x| x as usize).product();
+        let data = unsafe { slice::from_raw_parts(out_result, data_size).to_vec() };
         Ok(data)
+    }
+
+    /// Predict using only trees up to the given epoch (inclusive).
+    ///
+    /// Convenience wrapper around [`predict_with_config`](Booster::predict_with_config)
+    /// for the early-stopping workflow: `best_epoch` is the round with the best score
+    /// (e.g. from [`EarlyStopping::best_epoch`](EarlyStopping::best_epoch)).
+    ///
+    /// ```
+    /// # use xgboost_rs::{Booster, DMatrix, EarlyStopping};
+    /// # let dtrain = DMatrix::from_dense(&[1.0, 2.0, 3.0], 1).unwrap();
+    /// # let dtest = DMatrix::from_dense(&[1.0, 2.0, 3.0], 1).unwrap();
+    /// # let mut booster = Booster::new(3).unwrap();
+    /// # booster.set_params(&[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")]).unwrap();
+    /// # let mut es = EarlyStopping::new(3, "test", "", false);
+    /// # booster.add_callback(Box::new(es));
+    /// # booster.train(&dtrain, 10, &[(&dtest, "test")]).unwrap();
+    /// let preds = booster.predict_with_best_epoch(&dtest, 24)?;
+    /// # Ok::<(), xgboost_rs::XGBError>(())
+    /// ```
+    pub fn predict_with_best_epoch(&self, dmat: &DMatrix, best_epoch: u32) -> XGBResult<Vec<f32>> {
+        self.predict_with_config(
+            dmat,
+            &PredictConfig {
+                iteration_end: best_epoch as i64 + 1, // half-open: [0, best+1)
+                ..Default::default()
+            },
+        )
     }
 
     /// Predict margin for given data.
