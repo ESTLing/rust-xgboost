@@ -86,6 +86,25 @@ Separate crate-private module containing `TrainingCallback`, `EvalsLog`, `Evalua
 and `EarlyStopping`. Callbacks access `Booster` via `crate::Booster`; internal methods like
 `slice_trees` are `pub(crate)`.
 
+### Model persistence: three-tier serialization
+
+XGBoost has three independent persistence layers, each with different C APIs and use cases:
+
+| Tier | C API | What it saves | Use case |
+|---|---|---|---|
+| **Model** | `XGBoosterSaveModel` / `XGBoosterLoadModel` | Trees + objective + model params | Long-term storage, cross-version compatible |
+| **Config** | `XGBoosterSaveJsonConfig` / `XGBoosterLoadJsonConfig` | Internal parameter configuration (JSON) | Inspection, structured param debugging |
+| **Serialization** | `XGBoosterSerializeToBuffer` / `XGBoosterUnserializeFromBuffer` | Full memory snapshot (model + config + attributes) | Checkpointing, distributed training |
+
+Key implications for our bindings:
+
+- `Booster::save()` / `Booster::load()` use the **Model** tier — stable, but do **not** preserve
+  `set_attribute` values (e.g. `best_iteration`). After load, `best_iteration` is lost.
+- `EarlyStopping::with_save_best(true)` works around this by calling `XGBoosterSlice` to prune
+  trees before saving — the saved model uses only the best trees, so attribute loss is irrelevant.
+- The **Serialization** tier (not yet bound) is the only way to persist arbitrary attributes
+  across save/load without tree pruning. Equivalent to Python's pickle checkpointing.
+
 ## Reference implementation
 
 The Python XGBoost package at `../simq/.venv/Lib/site-packages/xgboost` serves as
