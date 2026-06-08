@@ -22,15 +22,17 @@ along with the estimated effort and priority for each gap.
 | 8 | `get_split_value_histogram()` | Low | Medium | Split value histogram for a given feature. |
 | 9 | `trees_to_dataframe()` | Low | Large | Export trees as pandas DataFrame. Requires pandas dependency or alternative. |
 | 10 | `num_boosted_rounds()` / `num_features()` | Medium | Small | Model metadata accessors. `num_features` already available indirectly via `evaluate()`. |
-| 11 | `best_iteration` / `best_score` | Medium | Small | Access best iteration/score from early stopping (requires callback system first). |
+| 11 | `best_iteration` / `best_score` | Medium | Small | ⬜ Attributes written by `EarlyStopping::after_training`; accessible via `get_attribute()`. No dedicated accessor yet. |
 | 12 | `get_categories()` | Low | Medium | Get categorical feature information. |
 | 13 | `__getitem__()` / `__iter__()` | Low | Medium | Slice/iterate individual trees from the model. |
 
 ### Booster: Parameter & Predict Notes
 
-- **Rust `predict()`** is split into `predict`, `predict_margin`, `predict_leaf`, `predict_contributions`, `predict_interactions`, plus `predict_matrix` (low-level). Python uses a single `predict()` with keyword flags. Both approaches are valid.
+- **Rust `predict()`** is split into `predict`, `predict_margin`, `predict_leaf`, `predict_contributions`, `predict_interactions`. Python uses a single `predict()` with keyword flags. Both approaches are valid.
+- `predict_with_config(config)` provides tree limiting (`iteration_end`), covering the `iteration_range` use case.
+- `predict_with_best_epoch(epoch)` is a convenience for early stopping workflows.
 - **Rust `dump_model()`** returns a `String`; Python returns `List[str]` via `get_dump()`. Rust also has `dump_model_vec()`. Parity is acceptable.
-- **`set_param()`** exists in both.
+- **`set_param()` / `set_params()`** exist in both.
 - **Attribute system**: Rust has `get_attribute`/`set_attribute`/`get_attribute_names`, Python has `attr`/`attributes`/`set_attr`. Covered.
 
 ---
@@ -64,15 +66,15 @@ Missing input types:
 
 ## 3. Missing Classes (Entirely Absent)
 
-| # | Python Class | Priority | Effort | Description |
-|---|--------------|----------|--------|-------------|
-| 1 | **`QuantileDMatrix`** | **High** | Large | Memory-efficient DMatrix with built-in quantization. Required for large-scale datasets. Supports external memory via `DataIter`. Key features: `max_bin`, ref DMatrix for consistent binning, `max_quantile_batches`. |
-| 2 | **`ExtMemQuantileDMatrix`** | Medium | Large | External-memory QuantileDMatrix. Processes data in streaming batches. |
-| 3 | **`DataIter`** | **High** | Medium | Abstract data iterator for streaming/proxy DMatrix. Required for both QuantileDMatrix and ExtMemQuantileDMatrix. Provides `reset()`, `next()`, callback system. |
-| 4 | **`TrainingCallback`** (hierarchy) | **High** | Medium | Callback system including `EarlyStopping`, `EvaluationMonitor`, `TrainingCheckPoint`, `LearningRateScheduler`. |
-| 5 | **`CVPack`** | Medium | Small | Cross-validation fold helper. |
-| 6 | **`RabitTracker`** | Low | Large | Distributed training tracker (MPI-like). |
-| 7 | **`FederatedTracker`** | Low | Large | Federated learning tracker. |
+| # | Python Class | Priority | Effort | Status | Description |
+|---|--------------|----------|--------|--------|-------------|
+| 1 | **`QuantileDMatrix`** | **High** | Large | ❌ | Memory-efficient DMatrix with built-in quantization. Required for large-scale datasets. Supports external memory via `DataIter`. Key features: `max_bin`, ref DMatrix for consistent binning, `max_quantile_batches`. |
+| 2 | **`ExtMemQuantileDMatrix`** | Medium | Large | ❌ | External-memory QuantileDMatrix. Processes data in streaming batches. |
+| 3 | **`DataIter`** | **High** | Medium | ❌ | Abstract data iterator for streaming/proxy DMatrix. Required for both QuantileDMatrix and ExtMemQuantileDMatrix. Provides `reset()`, `next()`, callback system. |
+| 4 | **`TrainingCallback`** (hierarchy) | **High** | Medium | ✅ `TrainingCallback` trait, `EvaluationMonitor`, `EarlyStopping`. Missing: `TrainingCheckPoint`, `LearningRateScheduler`. |
+| 5 | **`CVPack`** | Medium | Small | ❌ | Cross-validation fold helper. |
+| 6 | **`RabitTracker`** | Low | Large | ❌ | Distributed training tracker (MPI-like). |
+| 7 | **`FederatedTracker`** | Low | Large | ❌ | Federated learning tracker. |
 
 ---
 
@@ -93,16 +95,16 @@ Missing input types:
 
 ### `Booster::train()` — Missing Parameters
 
-| # | Feature | Priority | Effort |
-|---|---------|----------|--------|
-| 1 | `obj` — Custom objective function | **High** | Medium |
-| 2 | `feval` / `custom_metric` — Custom evaluation metric | **High** | Small |
-| 3 | `callbacks` — Training callback pipeline | **High** | Large |
-| 4 | `xgb_model` — Continue training from existing model | Medium | Small |
-| 5 | `evals_result` — Store evaluation history | Medium | Small |
-| 6 | `early_stopping_rounds` — Built-in early stopping | **High** | Medium |
-| 7 | `verbose_eval` — Control evaluation output frequency | Medium | Small |
-| 8 | `maximize` — Direction for early stopping | Medium | Small |
+| # | Feature | Priority | Effort | Status |
+|---|---------|----------|--------|--------|
+| 1 | `obj` — Custom objective function | **High** | Medium | ❌ |
+| 2 | `feval` / `custom_metric` — Custom evaluation metric | **High** | Small | ✅ `set_custom_metric()` |
+| 3 | `callbacks` — Training callback pipeline | **High** | Large | ✅ `TrainingCallback` trait + `add_callback()` |
+| 4 | `xgb_model` — Continue training from existing model | Medium | Small | ❌ |
+| 5 | `evals_result` — Store evaluation history | Medium | Small | ✅ `train()` returns `EvalsLog` |
+| 6 | `early_stopping_rounds` — Built-in early stopping | **High** | Medium | ✅ `EarlyStopping` callback |
+| 7 | `verbose_eval` — Control evaluation output frequency | Medium | Small | ✅ `EvaluationMonitor` callback |
+| 8 | `maximize` — Direction for early stopping | Medium | Small | ✅ in `EarlyStopping` |
 
 ### `DMatrix::load()` / `load_binary()` — Missing Parameters
 
@@ -132,21 +134,25 @@ Python's `get_score()` with `importance_type` supports: `"weight"`, `"gain"`, `"
 
 ### Phase 1: Core Completeness (Must Have)
 
-1. **Custom objective + custom metric** in `Booster::train()` and `Booster::update()` / `boost()`
-2. **`Booster::boost()`** — single-step boosting with custom grad/hess
-3. **`Booster::inplace_predict()`** — predict from raw data
-4. **`EarlyStopping` callback** (+ `evals_result`, `early_stopping_rounds`, `maximize`, `verbose_eval`)
-5. **`Booster::eval_set()`** — multi-eval evaluation with iteration tracking
+| # | Feature | Status |
+|---|---------|--------|
+| 1 | Custom objective + custom metric in `Booster::train()` | ⬜ custom metric ✅, objective ❌ |
+| 2 | `Booster::boost()` — single-step boosting with custom grad/hess | ❌ |
+| 3 | `Booster::inplace_predict()` — predict from raw data | ❌ |
+| 4 | `EarlyStopping` callback (+ `evals_result`, `early_stopping_rounds`, `maximize`, `verbose_eval`) | ✅ |
+| 5 | `Booster::eval_set()` — multi-eval evaluation with iteration tracking | ✅ |
 
 ### Phase 2: Feature Parity (Should Have)
 
-6. **`QuantileDMatrix`** — histogram-based memory-efficient DMatrix
-7. **`DataIter`** — streaming data iterator abstraction
-8. **`Booster::get_score()`** — feature importance
-9. **`cv()`** — cross-validation
-10. **`copy()` / `reset()`** — booster lifecycle
-11. **`save_config()` / `load_config()`** — config serialization
-12. **`num_boosted_rounds()` / `best_iteration` / `best_score`** — metadata access
+| # | Feature | Status |
+|---|---------|--------|
+| 6 | `QuantileDMatrix` — histogram-based memory-efficient DMatrix | ❌ |
+| 7 | `DataIter` — streaming data iterator abstraction | ❌ |
+| 8 | `Booster::get_score()` — feature importance | ❌ |
+| 9 | `cv()` — cross-validation | ❌ |
+| 10 | `copy()` / `reset()` — booster lifecycle | ❌ |
+| 11 | `save_config()` / `load_config()` — config serialization | ❌ |
+| 12 | `num_boosted_rounds()` / `best_iteration` / `best_score` — metadata access | ⬜ attributes written by `EarlyStopping`, no accessors yet |
 
 ### Phase 3: Advanced Features (Nice to Have)
 

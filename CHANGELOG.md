@@ -5,7 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - Unreleased
+## [0.2.0] - Unreleased
+
+### Added
+- Training callback system (`TrainingCallback` trait):
+  - `EvaluationMonitor` — prints metrics at fixed interval via `log::info!`
+  - `EarlyStopping` — stops training when metric stops improving; writes `best_iteration`/`best_score` attributes
+  - `add_callback()` setter — callbacks stored on `Booster`, `train()` stays at 3 params
+- `EvalsLog` type — per-iteration metric history returned by `train()`, passed to callbacks
+- `set_custom_metric()` — user-defined `(name, score)` pairs, visible to callbacks and early stopping
+- `predict_with_config()` — general tree-limited prediction using `PredictConfig`
+- `predict_with_best_epoch()` — convenience for early-stopping workflow
+- `set_params()` — batch parameter setter on `Booster`
+- `Booster::new(num_features)` — creates internal dummy matrix, no need to pass `&DMatrix` at construction
+- `json_cstr!` macro — constructs XGBoost-compatible JSON `CString` with NaN handling
+
+### Changed
+- `train()` is now an instance method (`&mut self`) instead of a static constructor
+- Callbacks and custom metrics moved from `train()` parameters to `Booster` fields (setters)
+- `predict()` switched from `XGBoosterPredict` to `XGBoosterPredictFromDMatrix` C API
+- `PredictConfig::as_json()` renamed to `as_cstr()`, returns `CString`
+- C API output (`print!`/`println!`) replaced with `log` crate macros in public functions
+
+### Fixed
+- `EarlyStopping` writes `best_iteration` attribute so `predict_with_best_epoch` can limit trees after early stop
+
+## [0.1.0] - 2024-06-08
 
 ### Added
 - Rust bindings for XGBoost 3.2.x C API
@@ -13,7 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `from_dense`, `from_csr`, `from_csc`, `load`, `load_binary`
   - Metadata: `num_rows`, `num_cols`, `shape`, `num_nonmissing`, `slice`
   - Labels/weights: `set_label`/`get_label`, `set_weight`/`get_weight`
-  - Generic info: `get_float_info`/`set_float_info`, `get_uint_info`/`set_uint_info`
   - Serialization: `save` (binary format)
 - `Booster` for training, prediction, evaluation, model persistence:
   - `train` with eval sets; `update` for single-iteration boosting
@@ -34,4 +58,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deprecated `XGDMatrixCreateFromFile` replaced in all load paths
 - Drop implementations safe against double-panic on cleanup failure
 
+[0.2.0]: https://github.com/ESTLing/rust-xgboost/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/ESTLing/rust-xgboost/releases/tag/v0.1.0
