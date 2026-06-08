@@ -114,7 +114,9 @@ pub trait TrainingCallback {
     fn after_iteration(&mut self, booster: &Booster, epoch: u32, evals_log: &EvalsLog) -> bool;
 
     /// Called after training completes (even if stopped early).
-    fn after_training(&mut self, _booster: &Booster) {}
+    ///
+    /// Receives `&mut Booster` so callbacks can write attributes (e.g. `best_iteration`).
+    fn after_training(&mut self, _booster: &mut Booster) {}
 }
 
 /// Built-in callback that prints evaluation metrics at a fixed interval.
@@ -196,6 +198,7 @@ pub struct EarlyStopping {
     min_delta: f32,
     current_rounds: usize,
     best_score: Option<f32>,
+    best_epoch: Option<u32>,
 }
 
 impl EarlyStopping {
@@ -216,6 +219,7 @@ impl EarlyStopping {
             min_delta: 0.0,
             current_rounds: 0,
             best_score: None,
+            best_epoch: None,
         }
     }
 
@@ -226,10 +230,17 @@ impl EarlyStopping {
         self.min_delta = delta;
         self
     }
+
+    /// Returns the epoch with the best score, if any improvement was recorded.
+    ///
+    /// Only valid after training completes.
+    pub fn best_epoch(&self) -> Option<u32> {
+        self.best_epoch
+    }
 }
 
 impl TrainingCallback for EarlyStopping {
-    fn after_iteration(&mut self, _booster: &Booster, _epoch: u32, evals_log: &EvalsLog) -> bool {
+    fn after_iteration(&mut self, _booster: &Booster, epoch: u32, evals_log: &EvalsLog) -> bool {
         if evals_log.is_empty() {
             return false;
         }
@@ -267,6 +278,7 @@ impl TrainingCallback for EarlyStopping {
         match self.best_score {
             None => {
                 self.best_score = Some(score);
+                self.best_epoch = Some(epoch);
                 self.current_rounds = 0;
             }
             Some(best) => {
@@ -277,6 +289,7 @@ impl TrainingCallback for EarlyStopping {
                 };
                 if improved {
                     self.best_score = Some(score);
+                    self.best_epoch = Some(epoch);
                     self.current_rounds = 0;
                 } else {
                     self.current_rounds += 1;
@@ -287,10 +300,19 @@ impl TrainingCallback for EarlyStopping {
         self.current_rounds >= self.rounds
     }
 
-    fn after_training(&mut self, _booster: &Booster) {
+    fn after_training(&mut self, booster: &mut Booster) {
+        // Write best_iteration attribute so predict() can limit trees
+        if let Some(best_epoch) = self.best_epoch {
+            // best_iteration is the epoch of the best score, stored as str
+            let _ = booster.set_attribute("best_iteration", &best_epoch.to_string());
+            if let Some(score) = self.best_score {
+                let _ = booster.set_attribute("best_score", &score.to_string());
+            }
+        }
         // Reset for reuse
         self.current_rounds = 0;
         self.best_score = None;
+        self.best_epoch = None;
     }
 }
 
@@ -424,10 +446,7 @@ impl Booster {
     ///     vec![("mse".into(), mse)]
     /// }));
     /// ```
-    pub fn set_custom_metric(
-        &mut self,
-        metric: Box<dyn Fn(&[f32], &DMatrix) -> Vec<(String, f32)>>,
-    ) {
+    pub fn set_custom_metric(&mut self, metric: Box<dyn Fn(&[f32], &DMatrix) -> Vec<(String, f32)>>) {
         self.custom_metric = Some(metric);
     }
 

@@ -6,6 +6,15 @@ The shared library is downloaded automatically from
 [PyPI](https://pypi.org/project/xgboost/) at build time — no system
 packages or manual compilation needed.
 
+## Highlights
+
+- **Flat string key-value API** — params just like Python's `xgb.train()`
+- **Training callbacks** — `EvaluationMonitor`, `EarlyStopping`, or your own impl of `TrainingCallback`
+- **Custom evaluation metrics** — user-defined `(name, score)` pairs, visible to callbacks
+- **EvalsLog** — full per-iteration metric history returned from `train()`
+- **No duplicate params** — `Booster::new(feature_count)` is all you need before training
+- **Zero system deps** — XGBoost shared library auto-downloaded at build time
+
 ## Requirements
 
 - **Rust 1.71+** (uses [`raw-dylib`](https://doc.rust-lang.org/reference/items/external-blocks.html#the-link-attribute) for Windows linking)
@@ -14,39 +23,39 @@ packages or manual compilation needed.
 ## Basic usage
 
 ```rust
-use xgboost_rs::{DMatrix, Booster};
+use xgboost_rs::{Booster, DMatrix, EvaluationMonitor, EarlyStopping};
 
-fn main() {
-    // training matrix with 5 examples and 3 features
-    let x_train = &[1.0, 1.0, 1.0,
-                    1.0, 1.0, 0.0,
-                    1.0, 1.0, 1.0,
-                    0.0, 0.0, 0.0,
-                    1.0, 1.0, 1.0];
-    let mut dtrain = DMatrix::from_dense(x_train, 5).unwrap();
-    dtrain.set_label(&[1.0, 1.0, 1.0, 0.0, 1.0]).unwrap();
+// Training data: 5 rows × 3 features
+let x_train = &[1.0, 1.0, 1.0,  1.0, 1.0, 0.0,  1.0, 1.0, 1.0,
+                0.0, 0.0, 0.0,  1.0, 1.0, 1.0];
+let mut dtrain = DMatrix::from_dense(x_train, 5).unwrap();
+dtrain.set_label(&[1.0, 1.0, 1.0, 0.0, 1.0]).unwrap();
 
-    let x_test = &[0.7, 0.9, 0.6];
-    let mut dtest = DMatrix::from_dense(x_test, 1).unwrap();
-    dtest.set_label(&[1.0]).unwrap();
+let x_test = &[0.7, 0.9, 0.6];
+let mut dtest = DMatrix::from_dense(x_test, 1).unwrap();
+dtest.set_label(&[1.0]).unwrap();
 
-    let eval_sets = &[(&dtrain, "train"), (&dtest, "test")];
+// Create booster, set params, add callbacks
+let mut booster = Booster::new(3).unwrap();
+booster.set_params(&[
+    ("max_depth", "2"),
+    ("eta", "1.0"),
+    ("objective", "binary:logistic"),
+    ("eval_metric", "logloss"),
+]).unwrap();
 
-    // All parameters as string key-value pairs, just like Python
-    let bst = Booster::train(
-        &[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")],
-        &dtrain,
-        2,
-        Some(eval_sets),
-    ).unwrap();
+booster.add_callback(Box::new(EvaluationMonitor::new(1)));
+booster.add_callback(Box::new(EarlyStopping::new(
+    3, "test", "", false,
+)));
 
-    println!("{:?}", bst.predict(&dtest).unwrap());
-}
+let history = booster.train(&dtrain, 100, &[(&dtest, "test")]).unwrap();
+println!("{:?}", booster.predict(&dtest).unwrap());
 ```
 
 ## XGBoost version
 
-`xgboost-rs` targets **XGBoost 3.2.0** (tested). Versions 3.0.0 and 3.1.0
+`xgboost-rs` targets **XGBoost 3.2.0** (tested on Windows). Versions 3.0.0 and 3.1.0
 are also supported but untested. Set the `XGBOOST_VERSION` environment
 variable to choose a version:
 
