@@ -9,7 +9,7 @@
 //! # Basic usage example
 //!
 //! ```
-//! use xgboost_rs::{DMatrix, Booster};
+//! use xgboost_rs::{DMatrix, Booster, EvaluationMonitor, EvalsLog};
 //!
 //! fn main() {
 //!     let x_train = &[1.0, 1.0, 1.0,
@@ -24,16 +24,20 @@
 //!     let mut dtest = DMatrix::from_dense(x_test, 1).unwrap();
 //!     dtest.set_label(&[1.0]).unwrap();
 //!
-//!     let eval_sets = &[(&dtrain, "train"), (&dtest, "test")];
+//!     let mut booster = Booster::new(&dtrain).unwrap();
+//!     booster.set_params(&[
+//!         ("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic"),
+//!     ]).unwrap();
 //!
-//!     let bst = Booster::train(
-//!         &[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")],
+//!     let mut monitor = EvaluationMonitor::new(1);
+//!     let history = booster.train(
 //!         &dtrain,
 //!         2,
-//!         Some(eval_sets),
+//!         &[(&dtrain, "train"), (&dtest, "test")],
+//!         &mut [&mut monitor],
 //!     ).unwrap();
 //!
-//!     println!("{:?}", bst.predict(&dtest).unwrap());
+//!     println!("{:?}", booster.predict(&dtest).unwrap());
 //! }
 //! ```
 //!
@@ -94,7 +98,7 @@ mod dmatrix;
 pub use dmatrix::{DMatrix, KEY_GROUP, KEY_GROUP_PTR, KEY_LABEL, KEY_WEIGHT, KEY_BASE_MARGIN, KEY_LABEL_LOWER_BOUND, KEY_LABEL_UPPER_BOUND, KEY_QID};
 
 mod booster;
-pub use booster::{Booster, FeatureMap, FeatureType, PredictConfig, PredictType};
+pub use booster::{Booster, EvalsLog, EvaluationMonitor, FeatureMap, FeatureType, PredictConfig, PredictType, TrainingCallback};
 use std::{ffi, path::Path};
 
 #[cfg(not(target_os = "windows"))]

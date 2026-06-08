@@ -1,4 +1,4 @@
-use xgboost_rs::{Booster, DMatrix, KEY_LABEL};
+use xgboost_rs::{Booster, DMatrix, EvaluationMonitor};
 
 fn main() {
     // Create a simple synthetic dataset: 8 rows, 3 features
@@ -21,13 +21,14 @@ fn main() {
     // Train using flat string key-value parameters
     let eval_sets = &[(&dtest, "test"), (&dtrain, "train")];
     println!("\nTraining tree booster...");
-    let booster = Booster::train(
-        &[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")],
-        &dtrain,
-        10,
-        Some(eval_sets),
-    )
-    .expect("train");
+    let mut booster = Booster::new(&dtrain).expect("Booster::new");
+    booster
+        .set_params(&[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")])
+        .expect("set_params");
+    let mut monitor = EvaluationMonitor::new(1);
+    let _ = booster
+        .train(&dtrain, 10, eval_sets, &mut [&mut monitor])
+        .expect("train");
 
     // Predict
     let preds = booster.predict(&dtest).expect("predict");
@@ -59,14 +60,9 @@ fn main() {
     let indices = &[0, 2, 2, 1];
     let sparse_data = &[1.0, 2.0, 3.0, 4.0];
     let mut dmat = DMatrix::from_csr(indptr, indices, sparse_data, Some(3)).expect("from_csr");
-    dmat.set_label(&[0.0, 1.0, 0.0])
-        .expect("set_labels csr");
-    let bst = Booster::train(
-        &[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")],
-        &dmat,
-        2,
-        None,
-    )
-    .expect("train csr");
+    dmat.set_label(&[0.0, 1.0, 0.0]).expect("set_labels csr");
+    let mut bst = Booster::new(&[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")])
+        .expect("Booster::new for csr");
+    bst.train(&dmat, 2, &[], &mut []).expect("train csr");
     println!("CSR predictions: {:?}", bst.predict(&dmat).expect("predict csr"));
 }

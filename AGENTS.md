@@ -16,12 +16,11 @@ Parameters are `&[(&str, &str)]` pairs — no structs, no builders, no enums for
 Users copy parameter names directly from [XGBoost docs](https://xgboost.readthedocs.io/en/latest/parameter.html).
 
 ```rust
-Booster::train(
-    &[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")],
-    &dtrain,
-    10,
-    Some(&[(&dtest, "test")]),
-)?;
+let mut booster = Booster::new(&dtrain)?;
+booster.set_params(&[
+    ("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic"),
+])?;
+let history = booster.train(&dtrain, 10, &[(&dtest, "test")], &mut callbacks)?;
 ```
 
 ### Build: PyPI wheel, no system dependencies
@@ -43,6 +42,21 @@ XGBoost 3.2+ C API expects `__array_interface__` JSON (Python numpy protocol) fo
 `XGDMatrixCreateFromDense`/`CreateFromCSR`/`CreateFromCSC` take JSON strings containing
 memory pointers and shape info, not raw float/int pointers.
 
+### Training callback architecture
+
+Three-layer separation, matching Python's design:
+
+| Layer | Mechanism | Examples | User-modifiable? |
+|-------|-----------|----------|-----------------|
+| Model params | `Booster::set_param()` → `XGBoosterSetParam` | `max_depth`, `eta`, `objective`, `eval_metric` | Yes, via string pairs |
+| Train loop (fixed) | `XGBoosterUpdateOneIter` + `XGBoosterEvalOneIter` → populate `EvalsLog` | eval every iteration | No — baked into `train()` |
+| Callbacks | `TrainingCallback` trait | `EvaluationMonitor`, `EarlyStopping` | Yes, via trait impls |
+
+- `EvalsLog` lives as a local variable inside `train()`; callbacks receive `&EvalsLog` for read-only access.
+- Callbacks are traversed in order; returning `true` from `after_iteration` breaks the training loop (early stopping).
+- `train()` signature is fixed at 4 params (`&mut self`, dtrain, boost_rounds, eval_sets, callbacks) — new features go into callback impls, not new parameters.
+- `train()` returns `XGBResult<EvalsLog>` so the caller can inspect training history.
+
 ## Reference implementation
 
 The Python XGBoost package at `../simq/.venv/Lib/site-packages/xgboost` serves as
@@ -57,6 +71,7 @@ consult the Python implementation first.
 - **MSRV**: Rust 1.71+ (for raw-dylib support)
 - **XGBoost version**: Default 3.2.0, overridable via `XGBOOST_VERSION` env var
 - **Safety**: No `unwrap()` in Drop impls, no `assert!` for null checks in release builds
+- **Logging**: Use `log` crate macros (`info!`, `debug!`, `error!`, etc.) for all output in public functions; never use `print!`/`println!` directly. Users control log output via `env_logger` or similar.
 
 ## Rustdoc conventions
 

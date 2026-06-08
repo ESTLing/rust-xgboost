@@ -434,7 +434,7 @@ impl Drop for DMatrix {
 mod tests {
     use super::*;
     fn read_train_matrix() -> XGBResult<DMatrix> {
-        DMatrix::load(r#"{"uri": "xgboost-sys/xgboost/demo/data/agaricus.txt.train?format=libsvm"}"#)
+        DMatrix::load("xgboost-sys/xgboost/demo/data/agaricus.txt.train?format=libsvm")
     }
 
     #[test]
