@@ -11,8 +11,6 @@ packages or manual compilation needed.
 - **Flat string key-value API** — params just like Python's `xgb.train()`
 - **Training callbacks** — `EvaluationMonitor`, `EarlyStopping`, or your own impl of `TrainingCallback`
 - **Custom evaluation metrics** — user-defined `(name, score)` pairs, visible to callbacks
-- **EvalsLog** — full per-iteration metric history returned from `train()`
-- **No duplicate params** — `Booster::new(feature_count)` is all you need before training
 - **Zero system deps** — XGBoost shared library auto-downloaded at build time
 
 ## Requirements
