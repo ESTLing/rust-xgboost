@@ -8,6 +8,7 @@ use std::str::FromStr;
 use std::{ffi, fmt, fs::File, ptr, slice};
 
 use super::XGBResult;
+use super::NAN_SENTINEL;
 
 /// Used to control the return type of predictions made by C Booster API.
 enum PredictOption {
@@ -30,24 +31,51 @@ pub enum PredictType {
     PredictLeafTraining = 6,
 }
 
-#[derive(Default)]
 pub struct PredictConfig {
     pub _type: PredictType,
     pub training: bool,
     pub iteration_begin: i64,
     pub iteration_end: i64,
     pub strict_shape: bool,
+    /// Value to treat as missing. Defaults to `f32::NAN`, matching XGBoost convention.
+    ///
+    /// Used by [`Booster::inplace_predict`](crate::Booster::inplace_predict) for
+    /// `XGBoosterPredictFromDense`. Ignored by DMatrix-based prediction.
+    pub missing: f32,
+}
+
+impl Default for PredictConfig {
+    fn default() -> Self {
+        Self {
+            _type: PredictType::Normal,
+            training: false,
+            iteration_begin: 0,
+            iteration_end: 0,
+            strict_shape: false,
+            missing: f32::NAN,
+        }
+    }
 }
 
 impl PredictConfig {
-    /// Returns JSON C string for [`predict_with_config`].
+    /// Build a JSON C-string for the C API predict config.
+    ///
+    /// The `missing` field uses a sentinel that is post-processed to the bare
+    /// `NaN` literal required by XGBoost's JSON parser (since `serde_json` serializes
+    /// `f32::NAN` as `null`).
     pub fn as_cstr(&self) -> std::ffi::CString {
+        let missing_val = if self.missing.is_nan() {
+            format!("{}", NAN_SENTINEL)
+        } else {
+            format!("{}", self.missing)
+        };
         json_cstr!(
             "type" => self._type.clone() as usize,
             "training" => self.training,
             "iteration_begin" => self.iteration_begin,
             "iteration_end" => self.iteration_end,
             "strict_shape" => self.strict_shape,
+            "missing" => missing_val,
         )
     }
 }
@@ -71,7 +99,7 @@ impl PredictOption {
     }
 }
 
-pub use crate::callback::{EarlyStopping, EvaluationMonitor, EvalsLog, TrainingCallback};
+pub use crate::callback::{EarlyStopping, EvalsLog, EvaluationMonitor, TrainingCallback};
 
 /// Core model in XGBoost, containing functions for training, evaluating and predicting.
 ///
@@ -641,12 +669,7 @@ impl Booster {
     /// let preds = booster.inplace_predict(data, 2, &PredictConfig::default())?;
     /// # Ok::<(), xgboost_rs::XGBError>(())
     /// ```
-    pub fn inplace_predict(
-        &self,
-        data: &[f32],
-        num_rows: usize,
-        config: &PredictConfig,
-    ) -> XGBResult<Vec<f32>> {
+    pub fn inplace_predict(&self, data: &[f32], num_rows: usize, config: &PredictConfig) -> XGBResult<Vec<f32>> {
         let num_cols = data.len() / num_rows;
 
         let prefix = if cfg!(target_endian = "big") { ">" } else { "<" };
@@ -690,7 +713,11 @@ impl Booster {
     pub(crate) fn slice_trees(&mut self, begin: i32, end: i32) -> XGBResult<()> {
         let mut sliced_handle = ptr::null_mut();
         xgb_call!(xgboost_sys::XGBoosterSlice(
-            self.handle, begin, end, 1, &mut sliced_handle
+            self.handle,
+            begin,
+            end,
+            1,
+            &mut sliced_handle
         ))?;
         let old = std::mem::replace(&mut self.handle, sliced_handle);
         xgb_call!(xgboost_sys::XGBoosterFree(old)).ok();
@@ -1185,8 +1212,12 @@ mod tests {
         let data = &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         let num_rows = 4;
         let params = &[
-            ("max_depth", "2"), ("eta", "0.5"), ("objective", "binary:logistic"),
-            ("eval_metric", "logloss"), ("seed", "0"), ("nthread", "1"),
+            ("max_depth", "2"),
+            ("eta", "0.5"),
+            ("objective", "binary:logistic"),
+            ("eval_metric", "logloss"),
+            ("seed", "0"),
+            ("nthread", "1"),
         ];
 
         // Train for long enough that early stopping fires
@@ -1204,7 +1235,12 @@ mod tests {
         bst_a.add_callback(Box::new(es_a));
         bst_a.train(&dtrain_a, rounds, &[(&dtest_a, "test")]).unwrap();
 
-        let best_epoch = bst_a.get_attribute("best_iteration").unwrap().unwrap().parse::<u32>().unwrap();
+        let best_epoch = bst_a
+            .get_attribute("best_iteration")
+            .unwrap()
+            .unwrap()
+            .parse::<u32>()
+            .unwrap();
         assert!(best_epoch < rounds - 1, "early stopping should have fired"); // sanity check
         let preds_a = bst_a.predict_with_best_epoch(&dtest_a, best_epoch).unwrap();
 
