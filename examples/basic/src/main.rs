@@ -21,7 +21,7 @@ fn main() {
     // Train using flat string key-value parameters
     let eval_sets = &[(&dtest, "test"), (&dtrain, "train")];
     println!("\nTraining tree booster...");
-    let mut booster = Booster::new(&dtrain).expect("Booster::new");
+    let mut booster = Booster::new(3).expect("Booster::new");
     booster
         .set_params(&[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")])
         .expect("set_params");
@@ -61,8 +61,9 @@ fn main() {
     let sparse_data = &[1.0, 2.0, 3.0, 4.0];
     let mut dmat = DMatrix::from_csr(indptr, indices, sparse_data, Some(3)).expect("from_csr");
     dmat.set_label(&[0.0, 1.0, 0.0]).expect("set_labels csr");
-    let mut bst = Booster::new(&[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")])
-        .expect("Booster::new for csr");
+    let mut bst = Booster::new(3).expect("Booster::new for csr");
+    bst.set_params(&[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")])
+        .expect("set_params csr");
     bst.train(&dmat, 2, &[], &mut []).expect("train csr");
     println!("CSR predictions: {:?}", bst.predict(&dmat).expect("predict csr"));
 }

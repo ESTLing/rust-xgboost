@@ -126,9 +126,9 @@ pub trait TrainingCallback {
 /// ```no_run
 /// # use xgboost_rs::{Booster, DMatrix, EvaluationMonitor};
 /// # let dtrain = DMatrix::from_dense(&[1.0], 1).unwrap();
-/// # let mut booster = Booster::new(&dtrain).unwrap();
+/// # let mut booster = Booster::new(1).unwrap();
 /// let mut monitor = EvaluationMonitor::new(1); // print every iteration
-/// booster.train(&dtrain, 10, &[], &mut [&mut monitor]).unwrap();
+/// booster.train(10, &[], &mut [&mut monitor]).unwrap();
 /// ```
 pub struct EvaluationMonitor {
     period: usize,
@@ -173,21 +173,28 @@ impl TrainingCallback for EvaluationMonitor {
 /// For iterative control, use [`update`](struct.Booster.html#method.update) in a loop instead of `train`.
 pub struct Booster {
     handle: xgboost_sys::BoosterHandle,
+    _dummy_dmatrix: Option<DMatrix>,
 }
 
 impl Booster {
-    /// Create a new Booster for training on the given matrix.
+    /// Create a new Booster for training.
     ///
-    /// The training matrix is passed to `XGBoosterCreate` so the booster knows `num_feature`
-    /// before training. Use [`load`](Booster::load) instead if restoring a saved model.
+    /// `num_features` tells XGBoost the feature dimensionality. An internal dummy matrix
+    /// is created and kept alive for the booster's lifetime.
+    /// Use [`load`](Booster::load) instead if restoring a saved model.
     ///
     /// Set parameters via [`set_param`](Booster::set_param) or [`set_params`](Booster::set_params)
     /// before calling [`train`](Booster::train).
-    pub fn new(dtrain: &DMatrix) -> XGBResult<Self> {
-        let dmats = [dtrain.handle];
+    pub fn new(num_features: usize) -> XGBResult<Self> {
+        let dummy_data = vec![0.0f32; num_features];
+        let dummy = DMatrix::from_dense(&dummy_data, 1)?;
+        let dmats = [dummy.handle];
         let mut handle = ptr::null_mut();
         xgb_call!(xgboost_sys::XGBoosterCreate(dmats.as_ptr(), 1, &mut handle))?;
-        Ok(Booster { handle })
+        Ok(Booster {
+            handle,
+            _dummy_dmatrix: Some(dummy),
+        })
     }
 
     /// Save this Booster as a binary file at given path.
@@ -227,7 +234,10 @@ impl Booster {
         let mut handle = ptr::null_mut();
         xgb_call!(xgboost_sys::XGBoosterCreate(ptr::null(), 0, &mut handle))?;
         xgb_call!(xgboost_sys::XGBoosterLoadModel(handle, fname.as_ptr()))?;
-        Ok(Booster { handle })
+        Ok(Booster {
+            handle,
+            _dummy_dmatrix: None,
+        })
     }
 
     /// Load a Booster directly from a buffer.
@@ -241,7 +251,10 @@ impl Booster {
             bytes.as_ptr() as *const _,
             bytes.len() as u64
         ))?;
-        Ok(Booster { handle })
+        Ok(Booster {
+            handle,
+            _dummy_dmatrix: None,
+        })
     }
 
     /// Train this model for a given number of boosting rounds.
@@ -265,9 +278,9 @@ impl Booster {
     ///
     /// ```no_run
     /// # use xgboost_rs::{Booster, DMatrix, EvaluationMonitor};
-    /// # let dtrain = DMatrix::from_dense(&[1.0, 2.0], 1).unwrap();
-    /// # let dtest = DMatrix::from_dense(&[3.0], 1).unwrap();
-    /// let mut booster = Booster::new(&dtrain).unwrap();
+    /// # let dtrain = DMatrix::from_dense(&[1.0, 2.0, 3.0], 1).unwrap();
+    /// # let dtest = DMatrix::from_dense(&[1.0, 2.0, 3.0], 1).unwrap();
+    /// let mut booster = Booster::new(3).unwrap();
     /// booster.set_params(&[
     ///     ("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic"),
     /// ]).unwrap();
@@ -290,7 +303,11 @@ impl Booster {
         let mut evals_log: EvalsLog = BTreeMap::new();
 
         for i in 0..boost_rounds {
-            self.update(dtrain, i as i32)?;
+            xgb_call!(xgboost_sys::XGBoosterUpdateOneIter(
+                self.handle,
+                i as i32,
+                dtrain.handle
+            ))?;
 
             // Evaluate on all eval sets
             let eval_results = self.eval_set(eval_sets, i as i32)?;
@@ -772,7 +789,7 @@ impl Booster {
     /// ```
     /// # use xgboost_rs::{Booster, DMatrix};
     /// # let dtrain = DMatrix::from_dense(&[1.0], 1).unwrap();
-    /// let mut booster = Booster::new(&dtrain).unwrap();
+    /// let mut booster = Booster::new(2).unwrap();
     /// booster.set_params(&[
     ///     ("max_depth", "2"),
     ///     ("eta", "1.0"),
@@ -931,18 +948,14 @@ mod tests {
 
     #[test]
     fn set_booster_param() {
-        let data = &[1.0, 2.0];
-        let dtrain = DMatrix::from_dense(data, 1).expect("Creating DMatrix failed");
-        let mut booster = Booster::new(&dtrain).expect("Creating Booster failed");
+        let mut booster = Booster::new(2).expect("Creating Booster failed");
         let res = booster.set_param("key", "value");
         assert!(res.is_ok());
     }
 
     #[test]
     fn get_set_attr() {
-        let data = &[1.0, 2.0];
-        let dtrain = DMatrix::from_dense(data, 1).expect("Creating DMatrix failed");
-        let mut booster = Booster::new(&dtrain).expect("Creating Booster failed");
+        let mut booster = Booster::new(2).expect("Creating Booster failed");
         let attr = booster.get_attribute("foo").expect("Getting attribute failed");
         assert_eq!(attr, None);
 
@@ -953,9 +966,7 @@ mod tests {
 
     #[test]
     fn save_and_load_from_buffer() {
-        let data = &[1.0, 2.0];
-        let dtrain = DMatrix::from_dense(data, 1).expect("Creating DMatrix failed");
-        let mut booster = Booster::new(&dtrain).expect("Creating Booster failed");
+        let mut booster = Booster::new(2).expect("Creating Booster failed");
         let attr = booster.get_attribute("foo").expect("Getting attribute failed");
         assert_eq!(attr, None);
 
@@ -981,9 +992,7 @@ mod tests {
 
     #[test]
     fn get_attribute_names() {
-        let data = &[1.0, 2.0];
-        let dtrain = DMatrix::from_dense(data, 1).expect("Creating DMatrix failed");
-        let mut booster = Booster::new(&dtrain).expect("Creating Booster failed");
+        let mut booster = Booster::new(2).expect("Creating Booster failed");
         let attrs = booster.get_attribute_names().expect("Getting attributes failed");
         assert_eq!(attrs, Vec::<String>::new());
 
@@ -1005,9 +1014,7 @@ mod tests {
 
     #[test]
     fn get_set_feature_names() {
-        let data = &[1.0, 2.0];
-        let dtrain = DMatrix::from_dense(data, 1).expect("Creating DMatrix failed");
-        let booster = Booster::new(&dtrain).expect("Creating Booster failed");
+        let booster = Booster::new(2).expect("Creating Booster failed");
         let attrs = booster.get_feature_names().expect("Getting features failed");
         assert_eq!(attrs, Vec::<String>::new());
         let expected = vec!["foo", "another", "4"];
@@ -1016,11 +1023,8 @@ mod tests {
         assert_eq!(attrs.len(), 3);
     }
 
-    fn create_booster(params: &[(&str, &str)], dtrain: &DMatrix) -> Booster {
-        let dmats = [dtrain.handle];
-        let mut handle = ptr::null_mut();
-        xgb_call!(xgboost_sys::XGBoosterCreate(dmats.as_ptr(), 1, &mut handle)).unwrap();
-        let mut booster = Booster { handle };
+    fn create_booster(params: &[(&str, &str)], num_features: usize) -> Booster {
+        let mut booster = Booster::new(num_features).unwrap();
         for (key, value) in params {
             booster.set_param(key, value).unwrap();
         }
@@ -1036,7 +1040,7 @@ mod tests {
 
         let params = &[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")];
 
-        let mut booster = create_booster(params, &dtrain);
+        let mut booster = create_booster(params, 2);
         for i in 0..3 {
             booster.update(&dtrain, i).expect("update failed");
         }
@@ -1055,7 +1059,7 @@ mod tests {
         dtest.set_label(&[0.0, 1.0, 0.0, 1.0]).unwrap();
 
         let eval_sets = &[(&dtest, "test")];
-        let mut bst = Booster::new(&dtrain).expect("Creating Booster failed");
+        let mut bst = Booster::new(2).expect("Creating Booster failed");
         bst.set_params(&[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")])
             .expect("set_params failed");
         bst.train(&dtrain, 2, eval_sets, &mut []).unwrap();

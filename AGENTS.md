@@ -16,7 +16,7 @@ Parameters are `&[(&str, &str)]` pairs — no structs, no builders, no enums for
 Users copy parameter names directly from [XGBoost docs](https://xgboost.readthedocs.io/en/latest/parameter.html).
 
 ```rust
-let mut booster = Booster::new(&dtrain)?;
+let mut booster = Booster::new(3)?;                     // feature count
 booster.set_params(&[
     ("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic"),
 ])?;
@@ -54,7 +54,7 @@ Three-layer separation, matching Python's design:
 
 - `EvalsLog` lives as a local variable inside `train()`; callbacks receive `&EvalsLog` for read-only access.
 - Callbacks are traversed in order; returning `true` from `after_iteration` breaks the training loop (early stopping).
-- `train()` signature is fixed at 4 params (`&mut self`, dtrain, boost_rounds, eval_sets, callbacks) — new features go into callback impls, not new parameters.
+- `train()` signature is fixed at 4 params (`dtrain`, `boost_rounds`, `eval_sets`, `callbacks`) — `num_features` goes into `Booster::new()`; new features go into callback impls, not new parameters.
 - `train()` returns `XGBResult<EvalsLog>` so the caller can inspect training history.
 
 ## Reference implementation

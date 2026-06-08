@@ -24,7 +24,7 @@
 //!     let mut dtest = DMatrix::from_dense(x_test, 1).unwrap();
 //!     dtest.set_label(&[1.0]).unwrap();
 //!
-//!     let mut booster = Booster::new(&dtrain).unwrap();
+//!     let mut booster = Booster::new(2).unwrap();
 //!     booster.set_params(&[
 //!         ("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic"),
 //!     ]).unwrap();
