@@ -247,17 +247,18 @@ impl TrainingCallback for EarlyStopping {
     }
 
     fn after_training(&mut self, booster: &mut crate::Booster) {
-        // Write best_iteration attribute so predict() can limit trees
         if let Some(best_epoch) = self.best_epoch {
-            let _ = booster.set_attribute("best_iteration", &best_epoch.to_string());
-            if let Some(score) = self.best_score {
-                let _ = booster.set_attribute("best_score", &score.to_string());
-            }
-
-            // If save_best, prune trees beyond best_epoch
+            // Slice first — XGBoosterSlice creates a new handle, so attributes
+            // must be written AFTER slicing to survive on the new handle.
             if self.save_best {
                 // XGBoosterSlice: [0, best_epoch+1) = first best_epoch+1 trees
                 let _ = booster.slice_trees(0, best_epoch as i32 + 1);
+            }
+
+            // Write best_iteration / best_score attributes for later retrieval.
+            let _ = booster.set_attribute("best_iteration", &best_epoch.to_string());
+            if let Some(score) = self.best_score {
+                let _ = booster.set_attribute("best_score", &score.to_string());
             }
         }
         // Reset for reuse
