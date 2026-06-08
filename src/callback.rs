@@ -128,6 +128,7 @@ pub struct EarlyStopping {
     data_name: Option<String>,
     maximize: Option<bool>,
     min_delta: f32,
+    save_best: bool,
     current_rounds: usize,
     best_score: Option<f32>,
     best_epoch: Option<u32>,
@@ -149,6 +150,7 @@ impl EarlyStopping {
             metric_name: if metric_name.is_empty() { None } else { Some(metric_name.to_string()) },
             maximize: Some(maximize),
             min_delta: 0.0,
+            save_best: false,
             current_rounds: 0,
             best_score: None,
             best_epoch: None,
@@ -160,6 +162,18 @@ impl EarlyStopping {
     /// Defaults to `0.0` — any improvement counts.
     pub fn with_min_delta(mut self, delta: f32) -> Self {
         self.min_delta = delta;
+        self
+    }
+
+    /// When enabled, the booster is pruned to keep only trees up to the best epoch
+    /// after training. This means [`Booster::predict`](crate::Booster::predict) will
+    /// use the best model without needing [`predict_with_best_epoch`](crate::Booster::predict_with_best_epoch).
+    ///
+    /// Matches Python's `EarlyStopping(save_best=True)`.
+    ///
+    /// Defaults to `false`.
+    pub fn with_save_best(mut self, save_best: bool) -> Self {
+        self.save_best = save_best;
         self
     }
 
@@ -238,6 +252,12 @@ impl TrainingCallback for EarlyStopping {
             let _ = booster.set_attribute("best_iteration", &best_epoch.to_string());
             if let Some(score) = self.best_score {
                 let _ = booster.set_attribute("best_score", &score.to_string());
+            }
+
+            // If save_best, prune trees beyond best_epoch
+            if self.save_best {
+                // XGBoosterSlice: [0, best_epoch+1) = first best_epoch+1 trees
+                let _ = booster.slice_trees(0, best_epoch as i32 + 1);
             }
         }
         // Reset for reuse

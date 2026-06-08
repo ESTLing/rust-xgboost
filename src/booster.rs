@@ -268,7 +268,7 @@ impl Booster {
             // Compute custom metrics
             if let Some(ref metric) = self.custom_metric {
                 for (dmat, name) in eval_sets {
-                    let preds = self.predict(dmat)?;
+                    let preds = self.predict(dmat, &PredictConfig::default())?;
                     let custom_metrics = metric(&preds, dmat);
                     let entry = evals_log.entry(name.to_string()).or_default();
                     for (metric_name, score) in custom_metrics {
@@ -560,26 +560,10 @@ impl Booster {
         Ok(result)
     }
 
-    /// Predict results for given data, using all trees.
+    /// Predict results for given data.
     ///
-    /// Returns an array containing one entry per row in the given data.
-    /// Uses the `XGBoosterPredictFromDMatrix` C API with default config.
-    ///
-    /// For fine-grained control, use [`predict_with_config`](Booster::predict_with_config).
-    pub fn predict(&self, dmat: &DMatrix) -> XGBResult<Vec<f32>> {
-        self.predict_with_config(dmat, &PredictConfig::default())
-    }
-
-    /// Predict with a custom configuration.
-    ///
-    /// The config's `iteration_end` limits which trees are used (0 = all).
-    /// Common use cases:
-    ///
-    /// | Scenario | Config |
-    /// |----------|--------|
-    /// | All trees (default) | `PredictConfig::default()` |
-    /// | First N trees | `PredictConfig { iteration_end: n, ..Default::default() }` |
-    /// | Trees in range | `PredictConfig { iteration_begin: a, iteration_end: b, .. }` |
+    /// Returns an array containing one entry per row.
+    /// Use [`PredictConfig`] to limit trees (e.g. `iteration_end` for early stopping).
     ///
     /// ```
     /// # use xgboost_rs::{Booster, DMatrix, PredictConfig};
@@ -587,14 +571,13 @@ impl Booster {
     /// # let mut booster = Booster::new(2).unwrap();
     /// # booster.set_params(&[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")]).unwrap();
     /// # booster.train(&dtrain, 2, &[]).unwrap();
-    /// let config = PredictConfig {
-    ///     iteration_end: 25,
-    ///     ..Default::default()
-    /// };
-    /// let preds = booster.predict_with_config(&dtrain, &config)?;
+    /// // All trees (default)
+    /// let preds = booster.predict(&dtrain, &PredictConfig::default())?;
+    /// // First 25 trees only
+    /// let preds = booster.predict(&dtrain, &PredictConfig { iteration_end: 25, ..Default::default() })?;
     /// # Ok::<(), xgboost_rs::XGBError>(())
     /// ```
-    pub fn predict_with_config(&self, dmat: &DMatrix, config: &PredictConfig) -> XGBResult<Vec<f32>> {
+    pub fn predict(&self, dmat: &DMatrix, config: &PredictConfig) -> XGBResult<Vec<f32>> {
         let cstr = config.as_cstr();
         let mut out_shape = ptr::null();
         let mut out_shape_dim = 0;
@@ -611,14 +594,14 @@ impl Booster {
             return Err(XGBError::new("predict: null result pointer".to_string()));
         }
         let shape = unsafe { slice::from_raw_parts(out_shape, out_shape_dim as usize) };
-        let data_size: usize = shape.iter().map(|&x| x as usize).product();
+        let data_size: usize = shape.iter().map(|&d| d as usize).product();
         let data = unsafe { slice::from_raw_parts(out_result, data_size).to_vec() };
         Ok(data)
     }
 
     /// Predict using only trees up to the given epoch (inclusive).
     ///
-    /// Convenience wrapper around [`predict_with_config`](Booster::predict_with_config)
+    /// Convenience wrapper around [`predict`](Booster::predict)
     /// for the early-stopping workflow: `best_epoch` is the round with the best score
     /// (e.g. from [`EarlyStopping::best_epoch`](EarlyStopping::best_epoch)).
     ///
@@ -635,13 +618,83 @@ impl Booster {
     /// # Ok::<(), xgboost_rs::XGBError>(())
     /// ```
     pub fn predict_with_best_epoch(&self, dmat: &DMatrix, best_epoch: u32) -> XGBResult<Vec<f32>> {
-        self.predict_with_config(
+        self.predict(
             dmat,
             &PredictConfig {
                 iteration_end: best_epoch as i64 + 1, // half-open: [0, best+1)
                 ..Default::default()
             },
         )
+    }
+
+    /// Predict directly from a dense `f32` array without constructing a [`DMatrix`].
+    ///
+    /// Data is in row-major order: `num_rows` rows, `data.len() / num_rows` columns.
+    /// Use [`PredictConfig`] to limit trees (e.g. for early stopping).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use xgboost_rs::{Booster, PredictConfig};
+    /// # let mut booster = Booster::new(2).unwrap();
+    /// let data = &[1.0, 2.0, 3.0, 4.0]; // 2 rows × 2 cols
+    /// let preds = booster.inplace_predict(data, 2, &PredictConfig::default())?;
+    /// # Ok::<(), xgboost_rs::XGBError>(())
+    /// ```
+    pub fn inplace_predict(
+        &self,
+        data: &[f32],
+        num_rows: usize,
+        config: &PredictConfig,
+    ) -> XGBResult<Vec<f32>> {
+        let num_cols = data.len() / num_rows;
+
+        let prefix = if cfg!(target_endian = "big") { ">" } else { "<" };
+        let typestr = format!("{}f4", prefix);
+
+        let array_json = json_cstr!(
+            "data" => serde_json::json!([data.as_ptr() as usize, false]),
+            "shape" => [num_rows, num_cols],
+            "typestr" => typestr.as_str(),
+            "version" => 3,
+        );
+
+        let config_cstr = config.as_cstr();
+        let mut out_shape = ptr::null();
+        let mut out_dim: xgboost_sys::bst_ulong = 0;
+        let mut out_result = ptr::null();
+
+        xgb_call!(xgboost_sys::XGBoosterPredictFromDense(
+            self.handle,
+            array_json.as_ptr() as *const raw::c_char,
+            config_cstr.as_ptr() as *const raw::c_char,
+            ptr::null_mut(),
+            &mut out_shape,
+            &mut out_dim,
+            &mut out_result,
+        ))?;
+
+        if out_result.is_null() {
+            return Err(XGBError::new("inplace_predict: null result pointer".to_string()));
+        }
+
+        let shape = unsafe { slice::from_raw_parts(out_shape, out_dim as usize) };
+        let data_size: usize = shape.iter().map(|&x| x as usize).product();
+        let result = unsafe { slice::from_raw_parts(out_result, data_size).to_vec() };
+        Ok(result)
+    }
+
+    /// Replace this booster with a slice containing only trees `[begin, end)`.
+    ///
+    /// Used by [`EarlyStopping`] when `save_best` is enabled to prune over-trained trees.
+    pub(crate) fn slice_trees(&mut self, begin: i32, end: i32) -> XGBResult<()> {
+        let mut sliced_handle = ptr::null_mut();
+        xgb_call!(xgboost_sys::XGBoosterSlice(
+            self.handle, begin, end, 1, &mut sliced_handle
+        ))?;
+        let old = std::mem::replace(&mut self.handle, sliced_handle);
+        xgb_call!(xgboost_sys::XGBoosterFree(old)).ok();
+        Ok(())
     }
 
     /// Predict margin for given data.
@@ -1104,7 +1157,7 @@ mod tests {
             booster.update(&dtrain, i).expect("update failed");
         }
 
-        let preds = booster.predict(&dtrain).unwrap();
+        let preds = booster.predict(&dtrain, &PredictConfig::default()).unwrap();
         assert_eq!(preds.len(), 4);
     }
 
@@ -1123,8 +1176,56 @@ mod tests {
             .expect("set_params failed");
         bst.train(&dtrain, 2, eval_sets).unwrap();
 
-        let preds = bst.predict(&dtest).unwrap();
+        let preds = bst.predict(&dtest, &PredictConfig::default()).unwrap();
         assert_eq!(preds.len(), 4);
+    }
+
+    #[test]
+    fn save_best_vs_predict_with_best_epoch() {
+        let data = &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let num_rows = 4;
+        let params = &[
+            ("max_depth", "2"), ("eta", "0.5"), ("objective", "binary:logistic"),
+            ("eval_metric", "logloss"), ("seed", "0"), ("nthread", "1"),
+        ];
+
+        // Train for long enough that early stopping fires
+        let rounds = 20u32;
+
+        // Path A: save_best=false, record best_epoch, predict_with_best_epoch
+        let mut dtrain_a = DMatrix::from_dense(data, num_rows).unwrap();
+        dtrain_a.set_label(&[0.0, 1.0, 0.0, 1.0]).unwrap();
+        let mut dtest_a = DMatrix::from_dense(data, num_rows).unwrap();
+        dtest_a.set_label(&[0.0, 1.0, 0.0, 1.0]).unwrap();
+
+        let mut bst_a = Booster::new(2).unwrap();
+        bst_a.set_params(params).unwrap();
+        let es_a = EarlyStopping::new(3, "test", "logloss", false);
+        bst_a.add_callback(Box::new(es_a));
+        bst_a.train(&dtrain_a, rounds, &[(&dtest_a, "test")]).unwrap();
+
+        let best_epoch = bst_a.get_attribute("best_iteration").unwrap().unwrap().parse::<u32>().unwrap();
+        assert!(best_epoch < rounds - 1, "early stopping should have fired"); // sanity check
+        let preds_a = bst_a.predict_with_best_epoch(&dtest_a, best_epoch).unwrap();
+
+        // Path B: save_best=true, predict uses pruned model directly
+        let mut dtrain_b = DMatrix::from_dense(data, num_rows).unwrap();
+        dtrain_b.set_label(&[0.0, 1.0, 0.0, 1.0]).unwrap();
+        let mut dtest_b = DMatrix::from_dense(data, num_rows).unwrap();
+        dtest_b.set_label(&[0.0, 1.0, 0.0, 1.0]).unwrap();
+
+        let mut bst_b = Booster::new(2).unwrap();
+        bst_b.set_params(params).unwrap();
+        let es_b = EarlyStopping::new(3, "test", "logloss", false).with_save_best(true);
+        bst_b.add_callback(Box::new(es_b));
+        bst_b.train(&dtrain_b, rounds, &[(&dtest_b, "test")]).unwrap();
+
+        let preds_b = bst_b.predict(&dtest_b, &PredictConfig::default()).unwrap();
+
+        assert_eq!(preds_a.len(), preds_b.len());
+        for (a, b) in preds_a.iter().zip(preds_b.iter()) {
+            assert!((a - b).abs() < 1e-6, "mismatch: {a} vs {b}");
+        }
     }
 
     #[test]

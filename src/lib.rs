@@ -36,7 +36,7 @@
 //!         &[(&dtrain, "train"), (&dtest, "test")],
 //!     ).unwrap();
 //!
-//!     println!("{:?}", booster.predict(&dtest).unwrap());
+//!     println!("{:?}", booster.predict(&dtest, &PredictConfig::default()).unwrap());
 //! }
 //! ```
 //!

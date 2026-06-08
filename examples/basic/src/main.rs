@@ -1,4 +1,4 @@
-use xgboost_rs::{Booster, DMatrix, EarlyStopping, EvaluationMonitor};
+use xgboost_rs::{Booster, DMatrix, EarlyStopping, EvaluationMonitor, PredictConfig};
 
 fn main() {
     // Create a simple synthetic dataset: 8 rows, 3 features
@@ -43,14 +43,14 @@ fn main() {
     println!("Trained {} rounds", history.values().next().unwrap().values().next().unwrap().len());
 
     // Predict
-    let preds = booster.predict(&dtest).expect("predict");
+    let preds = booster.predict(&dtest, &PredictConfig::default()).expect("predict");
     println!("Predictions: {:?}", &preds[..4]);
 
     // Save and load
     println!("\nSaving and loading Booster model...");
     booster.save("xgb.json").expect("save booster");
     let booster2 = Booster::load("xgb.json").expect("load booster");
-    let preds2 = booster2.predict(&dtest).expect("predict after load");
+    let preds2 = booster2.predict(&dtest, &PredictConfig::default()).expect("predict after load");
     assert_eq!(preds, preds2);
 
     // Save and load DMatrix
@@ -77,5 +77,5 @@ fn main() {
     bst.set_params(&[("max_depth", "2"), ("eta", "1.0"), ("objective", "binary:logistic")])
         .expect("set_params csr");
     bst.train(&dmat, 2, &[]).expect("train csr");
-    println!("CSR predictions: {:?}", bst.predict(&dmat).expect("predict csr"));
+    println!("CSR predictions: {:?}", bst.predict(&dmat, &PredictConfig::default()).expect("predict csr"));
 }
