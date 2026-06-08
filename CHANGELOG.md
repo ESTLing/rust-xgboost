@@ -27,9 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `PredictConfig::as_json()` renamed to `as_cstr()`, returns `CString`
 - C API output (`print!`/`println!`) replaced with `log` crate macros in public functions
 
-### Fixed
-- `EarlyStopping` writes `best_iteration` attribute so `predict_with_best_epoch` can limit trees after early stop
-
 ## [0.1.0] - 2024-06-08
 
 ### Added
@@ -58,5 +55,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deprecated `XGDMatrixCreateFromFile` replaced in all load paths
 - Drop implementations safe against double-panic on cleanup failure
 
-[0.2.0]: https://github.com/ESTLing/rust-xgboost/compare/v0.1.0...HEAD
+[0.2.0]: https://github.com/ESTLing/rust-xgboost/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ESTLing/rust-xgboost/releases/tag/v0.1.0
