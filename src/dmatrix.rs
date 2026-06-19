@@ -316,11 +316,16 @@ impl DMatrix {
     /// Set float metadata by field name.
     pub fn set_float_info(&mut self, field: &str, array: &[f32]) -> XGBResult<()> {
         let field = ffi::CString::new(field).unwrap();
-        xgb_call!(xgboost_sys::XGDMatrixSetFloatInfo(
+        let data_json = json_cstr!(
+            "data" => serde_json::json!([array.as_ptr() as usize, false]),
+            "shape" => [array.len()],
+            "typestr" => Self::ftypestr(4),
+            "version" => 3,
+        );
+        xgb_call!(xgboost_sys::XGDMatrixSetInfoFromInterface(
             self.handle,
             field.as_ptr(),
-            array.as_ptr(),
-            array.len() as u64
+            data_json.as_ptr()
         ))
     }
 
@@ -368,11 +373,16 @@ impl DMatrix {
     /// Set unsigned integer metadata by field name.
     pub fn set_uint_info(&mut self, field: &str, array: &[u32]) -> XGBResult<()> {
         let field = ffi::CString::new(field).unwrap();
-        xgb_call!(xgboost_sys::XGDMatrixSetUIntInfo(
+        let data_json = json_cstr!(
+            "data" => serde_json::json!([array.as_ptr() as usize, false]),
+            "shape" => [array.len()],
+            "typestr" => Self::utypestr(4),
+            "version" => 3,
+        );
+        xgb_call!(xgboost_sys::XGDMatrixSetInfoFromInterface(
             self.handle,
             field.as_ptr(),
-            array.as_ptr(),
-            array.len() as u64
+            data_json.as_ptr()
         ))
     }
 

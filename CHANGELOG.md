@@ -5,7 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.3] - Unreleased
+## [0.2.4] - 2026-06-19
+
+### Added
+- `examples/ranking/` — complete learning-to-rank demo: group/qid metadata, `rank:ndcg` objective, early stopping with NDCG maximization.
+
+### Changed
+- `DMatrix::set_float_info` / `set_uint_info` migrated from deprecated `XGDMatrixSetFloatInfo` / `XGDMatrixSetUIntInfo` to unified `XGDMatrixSetInfoFromInterface` (C API via `__array_interface__` JSON).
+
+## [0.2.3] - 2026-06-19
 
 ### Added
 - `PredictConfig::missing` — controls the missing-value sentinel in prediction config JSON (defaults to `f32::NAN`). Required by `XGBoosterPredictFromDense` for `inplace_predict`.
@@ -77,7 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deprecated `XGDMatrixCreateFromFile` replaced in all load paths
 - Drop implementations safe against double-panic on cleanup failure
 
-[0.2.3]: https://github.com/ESTLing/rust-xgboost/compare/v0.2.2...HEAD
+[0.2.4]: https://github.com/ESTLing/rust-xgboost/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/ESTLing/rust-xgboost/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/ESTLing/rust-xgboost/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/ESTLing/rust-xgboost/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ESTLing/rust-xgboost/compare/v0.1.0...v0.2.0
